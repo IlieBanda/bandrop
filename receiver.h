@@ -21,8 +21,10 @@ class Receiver {
         int addrlen = sizeof(address);
         int client_socket = accept(server_fd, (struct sockaddr*)&address, (socklen_t*)&addrlen);
         std::cout << "Клиент успешно подключился!\n";
-
-        AesEncryptor cryptor;
+        std::string password;
+        std::cout << "Введите 6-значный код подключения: ";
+        std::cin >> password;
+        AesEncryptor cryptor(password);
         unsigned char recv_buffer[4096 + 16];
         unsigned char dec_buffer[4096 + 16];
         FileHeader header;
@@ -30,10 +32,30 @@ class Receiver {
         std::cout << "Принимаю файл: " << header.filename << "\n";
         std::ofstream out_file(header.filename, std::ios::binary);
         int bytes_received;
+        long total_received = 0;
         while ((bytes_received = recv(client_socket, recv_buffer, sizeof(recv_buffer), 0)) > 0) {
             int dec_len = cryptor.decrypt(recv_buffer, bytes_received, dec_buffer);
+            if (dec_len == -1) {
+                std::cout << "\n[ОШИБКА] Неверный код подключения!\n";
+                out_file.close();
+                remove(header.filename);
+                close(client_socket);
+                return;
+            }
             out_file.write((char*)dec_buffer, dec_len);
+            total_received += bytes_received;
+            int percent = 0;
+            if (header.filesize > 0) percent = (total_received * 100) / header.filesize;
+            std::cout << "\r[";
+            for (int i = 0; i < 50; i++) {
+                if (i < percent / 2) std::cout << "=";
+                else if (i == percent / 2) std::cout << ">";
+                else std::cout << " ";
+            }
+            std::cout << "] " << percent << "%";
+            std::cout.flush();
         }
+        std::cout << "\n";
         std::cout << "Файл полностью принят и расшифрован\n";
     }
 };

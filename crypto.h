@@ -7,9 +7,14 @@ class AesEncryptor {
     unsigned char key[32];
     unsigned char iv[16];
     public:
-    AesEncryptor() {
-        for(int i=0; i<32; i++) key[i] = '0';
+    AesEncryptor(std::string password) {
         for(int i=0; i<16; i++) iv[i] = '0';
+        EVP_MD_CTX* mdctx = EVP_MD_CTX_new();
+        EVP_DigestInit_ex(mdctx, EVP_sha256(), nullptr);
+        EVP_DigestUpdate(mdctx, password.c_str(), password.length());
+        unsigned int key_len;
+        EVP_DigestFinal_ex(mdctx, key, &key_len);
+        EVP_MD_CTX_free(mdctx);
     }
     int encrypt(unsigned char* plaintext, int plaintext_len, unsigned char* ciphertext) {
         EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
@@ -33,7 +38,10 @@ class AesEncryptor {
         int total_len = 0;
         EVP_DecryptUpdate(ctx, plaintext, &len, ciphertext, ciphertext_len);
         total_len = total_len + len;
-        EVP_DecryptFinal_ex(ctx, plaintext + total_len, &len);
+        if (EVP_DecryptFinal_ex(ctx, plaintext + total_len, &len) != 1) {
+            EVP_CIPHER_CTX_free(ctx);
+            return -1;
+        }
         total_len = total_len + len;
         EVP_CIPHER_CTX_free(ctx);
         return(total_len);

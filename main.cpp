@@ -19,7 +19,8 @@ int main(int argc, char* argv[]) {
         std::cout << "Запуск в режиме клиента (Sender)...\n";
         std::string path;
         std::cout << "Перетащите файл в терминал и нажмите Enter...\n";
-        std::cin >> path;
+        std::cin.ignore();
+        std::getline(std::cin, path);
         Sender client;
         client.start("127.0.0.1", 9090, path);
     } else {

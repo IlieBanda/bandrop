@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
 project(BanDrop)
 find_package(OpenSSL REQUIRED)
-add_executable(drop main.cpp)
-target_link_libraries(drop OpenSSL::SSL OpenSSL::Crypto)
+add_executable(bandrop main.cpp)
+target_link_libraries(bandrop OpenSSL::SSL OpenSSL::Crypto)
