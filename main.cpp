@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include "version.h"
 #include "discovery.h"
+#include "pipe.h"
 #include "receiver.h"
 #include "sender.h"
 
@@ -25,11 +26,14 @@ void usage(const char* prog) {
         "Usage:\n"
         "  " << prog << " receive [--port N] [--out DIR] [--no-announce]\n"
         "  " << prog << " send <path> [<path>...] [--to IP] [--port N]\n"
+        "  " << prog << " pipe --listen | pipe --to IP    (secure stdin<->stdout)\n"
         "  " << prog << " discover\n\n"
         "Commands:\n"
         "  receive     Wait for an incoming transfer (announces itself on the LAN).\n"
         "  send        Send files and/or directories. With no --to, auto-discovers\n"
         "              a receiver on the local network.\n"
+        "  pipe        Secure, paired pipe between two machines (like netcat+ssh,\n"
+        "              but zero-config). Composes with any Unix command.\n"
         "  discover    List receivers currently waiting on the LAN.\n\n"
         "Options:\n"
         "  --to IP       Receiver address (skip LAN discovery).\n"
@@ -112,6 +116,19 @@ int cmd_discover() {
     return 0;
 }
 
+int cmd_pipe(std::vector<std::string> a) {
+    int port = DEFAULT_PORT;
+    std::string val, to, code;
+    if (take_opt(a, "--port", val) && !parse_port(val, port)) return 1;
+    take_opt(a, "--to", to);
+    take_opt(a, "--code", code);
+    bool listen = take_flag(a, "--listen");
+    bool announce = !take_flag(a, "--no-announce");
+    Pipe p;
+    if (listen) return p.listen(port, code, announce, hostname_or("bandrop"));
+    return p.connect(to, port, code);
+}
+
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -130,6 +147,7 @@ int main(int argc, char* argv[]) {
     if (cmd == "version") { std::cout << "bandrop " << BANDROP_VERSION << "\n"; return 0; }
     if (cmd == "receive") return cmd_receive(args);
     if (cmd == "send")    return cmd_send(args);
+    if (cmd == "pipe")     return cmd_pipe(args);
     if (cmd == "discover") return cmd_discover();
     std::cerr << "Unknown command: " << cmd << "\n\n";
     usage(argv[0]);

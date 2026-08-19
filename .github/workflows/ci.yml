@@ -25,3 +25,6 @@ jobs:
 
       - name: End-to-end transfer test
         run: bash tests/e2e.sh build/bandrop 9091
+
+      - name: End-to-end pipe test
+        run: bash tests/pipe_e2e.sh build/bandrop 9111

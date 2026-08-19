@@ -10,10 +10,11 @@ add_compile_options(-Wall -Wextra)
 
 find_package(OpenSSL REQUIRED)
 find_package(ZLIB REQUIRED)
+find_package(Threads REQUIRED)
 
 add_executable(bandrop main.cpp)
 target_compile_definitions(bandrop PRIVATE BANDROP_VERSION="${PROJECT_VERSION}")
-target_link_libraries(bandrop OpenSSL::SSL OpenSSL::Crypto ZLIB::ZLIB)
+target_link_libraries(bandrop OpenSSL::SSL OpenSSL::Crypto ZLIB::ZLIB Threads::Threads)
 
 include(GNUInstallDirs)
 install(TARGETS bandrop RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
