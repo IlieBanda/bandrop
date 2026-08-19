@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <unistd.h>
+#include "version.h"
 #include "discovery.h"
 #include "receiver.h"
 #include "sender.h"
@@ -116,8 +117,13 @@ int main(int argc, char* argv[]) {
         usage(argv[0]);
         return args.empty() ? 1 : 0;
     }
+    if (args[0] == "--version" || args[0] == "-V") {
+        std::cout << "bandrop " << BANDROP_VERSION << "\n";
+        return 0;
+    }
     std::string cmd = args[0];
     args.erase(args.begin());
+    if (cmd == "version") { std::cout << "bandrop " << BANDROP_VERSION << "\n"; return 0; }
     if (cmd == "receive") return cmd_receive(args);
     if (cmd == "send")    return cmd_send(args);
     if (cmd == "discover") return cmd_discover();
