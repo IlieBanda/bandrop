@@ -7,6 +7,7 @@
 #include "version.h"
 #include "discovery.h"
 #include "pipe.h"
+#include "serve.h"
 #include "receiver.h"
 #include "sender.h"
 
@@ -27,6 +28,7 @@ void usage(const char* prog) {
         "  " << prog << " receive [--port N] [--out DIR] [--no-announce]\n"
         "  " << prog << " send <path> [<path>...] [--to IP] [--port N]\n"
         "  " << prog << " pipe --listen | pipe --to IP    (secure stdin<->stdout)\n"
+        "  " << prog << " serve <path>...  [--port N] [--once]   (download in a browser)\n"
         "  " << prog << " discover\n\n"
         "Commands:\n"
         "  receive     Wait for an incoming transfer (announces itself on the LAN).\n"
@@ -34,6 +36,8 @@ void usage(const char* prog) {
         "              a receiver on the local network.\n"
         "  pipe        Secure, paired pipe between two machines (like netcat+ssh,\n"
         "              but zero-config). Composes with any Unix command.\n"
+        "  serve       Share files over HTTP so any browser/phone can download them\n"
+        "              (plain HTTP; LAN convenience mode). Prints a URL and QR code.\n"
         "  discover    List receivers currently waiting on the LAN.\n\n"
         "Options:\n"
         "  --to IP       Receiver address (skip LAN discovery).\n"
@@ -129,6 +133,16 @@ int cmd_pipe(std::vector<std::string> a) {
     return p.connect(to, port, code);
 }
 
+int cmd_serve(std::vector<std::string> a) {
+    int port = 8000;
+    std::string val;
+    if (take_opt(a, "--port", val) && !parse_port(val, port)) return 1;
+    bool once = take_flag(a, "--once");
+    if (a.empty()) { std::cerr << "serve: no files given.\n"; return 1; }
+    Serve s;
+    return s.start(a, port, once);
+}
+
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -148,6 +162,7 @@ int main(int argc, char* argv[]) {
     if (cmd == "receive") return cmd_receive(args);
     if (cmd == "send")    return cmd_send(args);
     if (cmd == "pipe")     return cmd_pipe(args);
+    if (cmd == "serve")    return cmd_serve(args);
     if (cmd == "discover") return cmd_discover();
     std::cerr << "Unknown command: " << cmd << "\n\n";
     usage(argv[0]);

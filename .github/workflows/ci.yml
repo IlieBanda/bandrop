@@ -28,3 +28,13 @@ jobs:
 
       - name: End-to-end pipe test
         run: bash tests/pipe_e2e.sh build/bandrop 9111
+
+      - name: End-to-end serve test
+        run: bash tests/serve_e2e.sh build/bandrop 8071
+
+      - name: QR reference verification
+        if: runner.os == 'Linux'
+        run: |
+          python3 -m pip install --quiet qrcode
+          g++ -std=c++17 -O2 -o /tmp/qrdump tests/qrdump.cpp
+          python3 tests/qr_verify.py
