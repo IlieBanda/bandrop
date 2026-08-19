@@ -80,4 +80,21 @@ inline bool make_parent_dirs(const std::string& base, const std::string& rel) {
     return true;
 }
 
+// If `path` exists, return a non-clobbering variant like "name (1).ext".
+inline std::string unique_path(const std::string& path) {
+    struct stat st{};
+    if (::stat(path.c_str(), &st) != 0) return path;
+    std::string dir, base = path;
+    size_t slash = path.find_last_of('/');
+    if (slash != std::string::npos) { dir = path.substr(0, slash + 1); base = path.substr(slash + 1); }
+    std::string stem = base, ext;
+    size_t dot = base.find_last_of('.');
+    if (dot != std::string::npos && dot != 0) { stem = base.substr(0, dot); ext = base.substr(dot); }
+    for (int i = 1; i < 10000; ++i) {
+        std::string cand = dir + stem + " (" + std::to_string(i) + ")" + ext;
+        if (::stat(cand.c_str(), &st) != 0) return cand;
+    }
+    return path;
+}
+
 } // namespace archive

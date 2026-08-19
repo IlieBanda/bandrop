@@ -2,6 +2,7 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <csignal>
 #include <unistd.h>
 #include "version.h"
 #include "discovery.h"
@@ -36,6 +37,7 @@ void usage(const char* prog) {
         "  --compress    Compress data on the fly (zlib) when sending.\n"
         "  --out DIR     Directory to save received files into (default: current).\n"
         "  --no-announce Do not advertise this receiver over UDP discovery.\n"
+        "  --overwrite   Overwrite existing files instead of auto-renaming.\n"
         "  -h, --help    Show this help.\n";
 }
 
@@ -69,8 +71,9 @@ int cmd_receive(std::vector<std::string> a) {
     if (take_opt(a, "--port", val) && !parse_port(val, port)) return 1;
     take_opt(a, "--out", out_dir);
     bool announce = !take_flag(a, "--no-announce");
+    bool overwrite = take_flag(a, "--overwrite");
     Receiver r;
-    return r.start(port, out_dir, announce, hostname_or("bandrop"));
+    return r.start(port, out_dir, announce, hostname_or("bandrop"), overwrite);
 }
 
 int cmd_send(std::vector<std::string> a) {
@@ -112,6 +115,7 @@ int cmd_discover() {
 } // namespace
 
 int main(int argc, char* argv[]) {
+    std::signal(SIGPIPE, SIG_IGN);
     std::vector<std::string> args(argv + 1, argv + argc);
     if (args.empty() || args[0] == "-h" || args[0] == "--help") {
         usage(argv[0]);

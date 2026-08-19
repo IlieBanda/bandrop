@@ -10,6 +10,7 @@
 #include "compress.h"
 #include "crypto.h"
 #include "discovery.h"
+#include "handshake.h"
 #include "net.h"
 #include "protocol.h"
 #include "session.h"
@@ -18,9 +19,13 @@
 
 class Receiver {
 public:
+    // set via start()
+
     // Listen on `port`, save incoming files under `out_dir`. When `announce`
     // is set, answer LAN discovery queries while waiting.
-    int start(int port, const std::string& out_dir, bool announce, const std::string& name) {
+    int start(int port, const std::string& out_dir, bool announce, const std::string& name,
+              bool overwrite = false) {
+        overwrite_ = overwrite;
         int listen_fd = net::listen_tcp(port, 1);
         if (listen_fd < 0) return 1;
 
@@ -45,6 +50,7 @@ public:
     }
 
 private:
+    bool overwrite_ = false;
     // Accept a TCP connection, answering discovery queries meanwhile.
     int wait_for_client(int listen_fd, int disc_fd, int port, const std::string& name) {
         for (;;) {
@@ -65,49 +71,18 @@ private:
 
     int handle(int fd, const std::string& out_dir) {
         // --- SPAKE2 handshake -------------------------------------------
-        std::vector<unsigned char> buf;
-        uint32_t len = 0;
-        if (proto::recv_frame(fd, buf, &len) != 1) {
-            std::cerr << "Handshake failed (no HELLO).\n"; return 1;
-        }
-        proto::Reader hr(buf.data(), len);
-        uint16_t ver = hr.u16();
-        if (ver != proto::PROTOCOL_VERSION) {
-            std::cerr << "Protocol mismatch (sender v" << ver
-                      << ", we speak v" << proto::PROTOCOL_VERSION << ").\n";
-            return 1;
-        }
-        unsigned char salt[crypto::SALT_LEN];
-        for (int i = 0; i < crypto::SALT_LEN; ++i) salt[i] = hr.u8();
-        auto peer_share = hr.blob();
-        if (!hr.ok) { std::cerr << "Malformed HELLO.\n"; return 1; }
-
-        std::string pin;
-        std::cout << "Enter the 6-digit pairing code: ";
-        if (!(std::cin >> pin)) return 1;
-
-        Spake2 spake(Spake2::Role::B, pin, salt, sizeof(salt));
-        Spake2::Session s = spake.finish(peer_share);
-
-        // REPLY: our element + confirmation.
-        proto::Writer reply;
-        reply.blob(spake.public_share());
-        reply.blob(s.confirm);
-        if (!proto::send_frame(fd, reply.buf.data(), (uint32_t)reply.buf.size())) return 1;
-
-        // CONFIRM from sender.
-        if (proto::recv_frame(fd, buf, &len) != 1) {
-            std::cerr << "[ERROR] Pairing failed (wrong code).\n"; return 1;
-        }
-        proto::Reader cr(buf.data(), len);
-        auto peer_confirm = cr.blob();
-        if (!cr.ok || !spake.verify_peer(peer_confirm)) {
-            std::cerr << "[ERROR] Pairing failed: wrong code.\n"; return 1;
-        }
+        auto key = handshake::responder(
+            fd,
+            [] { std::string pin; std::cout << "Enter the pairing code: ";
+                 std::cin >> pin; return pin; },
+            [](uint16_t ver) {
+                std::cerr << "Protocol mismatch (sender v" << ver
+                          << ", we speak v" << proto::PROTOCOL_VERSION << ").\n"; });
+        if (!key) { std::cerr << "[ERROR] Pairing failed: wrong code.\n"; return 1; }
         std::cout << "Secure channel established.\n";
 
         // --- receive ----------------------------------------------------
-        Session sess(fd, s.key);
+        Session sess(fd, *key);
         int64_t total_bytes = 0;
         uint32_t total_files = 0;
         bool compressed = false;
@@ -147,6 +122,12 @@ private:
                 if (!pr.ok) { std::cerr << "\nMalformed file header.\n"; delete bar; return 1; }
                 std::string full = out_dir.empty() ? rel : out_dir + "/" + rel;
                 archive::make_parent_dirs(out_dir.empty() ? "." : out_dir, rel);
+                if (!overwrite_) {
+                    std::string uniq = archive::unique_path(full);
+                    if (uniq != full)
+                        std::cout << "\n(exists) saving as " << uniq << "\n";
+                    full = uniq;
+                }
                 out.open(full, std::ios::binary | std::ios::trunc);
                 if (!out) { std::cerr << "\nCannot write: " << full << "\n"; delete bar; return 1; }
                 cur_name = full; cur_written = 0;

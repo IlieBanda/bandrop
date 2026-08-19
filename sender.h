@@ -7,6 +7,7 @@
 #include "archive.h"
 #include "compress.h"
 #include "crypto.h"
+#include "handshake.h"
 #include "net.h"
 #include "protocol.h"
 #include "session.h"
@@ -31,50 +32,21 @@ public:
         std::cout << "Connected to " << host << ":" << port << ".\n";
 
         // --- SPAKE2 handshake -------------------------------------------
-        auto salt = crypto::random_vec(crypto::SALT_LEN);
         std::string pin = make_pin();
         std::cout << "\n=========================================\n"
                   << "  PAIRING CODE:  " << pin << "\n"
                   << "=========================================\n"
                   << "Enter this code on the receiver.\n\n" << std::flush;
 
-        Spake2 spake(Spake2::Role::A, pin, salt.data(), salt.size());
-
-        // HELLO: version, salt, our public element X.
-        proto::Writer hello;
-        hello.u16(proto::PROTOCOL_VERSION);
-        hello.bytes(salt.data(), salt.size());
-        hello.blob(spake.public_share());
-        if (!proto::send_frame(fd, hello.buf.data(), (uint32_t)hello.buf.size())) {
-            std::cerr << "Handshake send failed.\n"; ::close(fd); return 1;
-        }
-
-        // REPLY: peer element Y + peer confirmation.
-        std::vector<unsigned char> buf;
-        uint32_t rlen = 0;
-        if (proto::recv_frame(fd, buf, &rlen) != 1) {
-            std::cerr << "Handshake failed (receiver disconnected).\n"; ::close(fd); return 1;
-        }
-        proto::Reader rr(buf.data(), rlen);
-        auto peer_share = rr.blob();
-        auto peer_confirm = rr.blob();
-        if (!rr.ok) { std::cerr << "Malformed handshake reply.\n"; ::close(fd); return 1; }
-
-        Spake2::Session s = spake.finish(peer_share);
-        if (!spake.verify_peer(peer_confirm)) {
+        auto key = handshake::initiator(fd, pin);
+        if (!key) {
             std::cerr << "[ERROR] Pairing failed: wrong code on the receiver.\n";
             ::close(fd); return 1;
-        }
-        // CONFIRM: our confirmation MAC.
-        proto::Writer conf;
-        conf.blob(s.confirm);
-        if (!proto::send_frame(fd, conf.buf.data(), (uint32_t)conf.buf.size())) {
-            std::cerr << "Handshake send failed.\n"; ::close(fd); return 1;
         }
         std::cout << "Secure channel established.\n";
 
         // --- transfer ---------------------------------------------------
-        Session sess(fd, s.key);
+        Session sess(fd, *key);
 
         proto::Writer man;
         man.u32((uint32_t)entries.size());
