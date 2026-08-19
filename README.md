@@ -1,61 +1,94 @@
 # 🚀 Bandrop
 
-**Bandrop** is a fast, secure, lightweight P2P file transfer CLI written in C++.
+**Bandrop** is a fast, secure, zero-config P2P file & folder transfer CLI
+written in modern C++. Think *Magic Wormhole* meets *AirDrop*: pair two
+machines on your LAN with a short code and move files directly between them —
+no cloud, no accounts, no size limits, no tracking.
 
-Inspired by *Magic Wormhole* and *AirDrop*, Bandrop securely sends files across
-your local network using a simple 6-digit pairing code. No cloud servers, no
-accounts, no tracking.
+## ✨ Highlights
 
-## ✨ Features
-
-- **Authenticated encryption over a framed protocol.** Files are streamed as
-  length-prefixed **AES-256-CBC** messages, each with a fresh random IV. Because
-  every message is framed, transfers stay correct over TCP regardless of how the
-  stream is chunked.
-- **PIN-based pairing with a real KDF.** The sender shows a random 6-digit PIN.
-  The key is derived from that PIN and a per-session random salt using
-  **PBKDF2-HMAC-SHA256** (200k iterations) — the PIN itself never crosses the wire.
-- **Wrong-PIN detection.** A bad code fails the padding check on the first frame,
-  so the receiver reports the error and cleans up instead of writing garbage.
-- **Robust I/O.** Full send/recv loops, socket and file error handling, filename
-  sanitization (basename only — no path traversal), progress bar, and human-readable
-  sizes.
-- **Minimal dependencies.** POSIX sockets and OpenSSL only.
+- **Password-authenticated key exchange (SPAKE2, RFC 9382 over P-256).**
+  The sender shows a random 6-digit code. Both sides run SPAKE2 to agree on a
+  session key — the PIN and the key never touch the wire, and there's no
+  transcript an eavesdropper or man-in-the-middle can brute-force the PIN
+  against offline. A wrong code fails key confirmation and the transfer aborts
+  *before any file data is exchanged*.
+- **Authenticated encryption (AES-256-GCM).** Every framed message carries a
+  fresh nonce and an authentication tag, so tampering and truncation are
+  detected on the fly.
+- **End-to-end integrity.** Each file's SHA-256 is verified on arrival.
+- **Zero-config LAN discovery.** Receivers advertise themselves over UDP; the
+  sender finds them automatically — no IP typing required.
+- **Files *and* folders.** Send whole directory trees; structure is preserved
+  and untrusted paths are sanitized (no path traversal).
+- **On-the-fly compression** (optional, zlib).
+- **Live progress** with transfer rate and ETA.
 
 ## 🛠️ Build
 
+Requires a C++17 compiler, CMake, OpenSSL and zlib.
+
 ```bash
-git clone https://github.com/IlieBanda/bandrop.git
-cd bandrop
+# Debian/Ubuntu: sudo apt-get install cmake g++ libssl-dev zlib1g-dev
 cmake -S . -B build
 cmake --build build
 ```
 
-The binary is produced at `build/bandrop`.
+The binary lands at `build/bandrop`. Run the tests with `ctest --test-dir build`.
 
 ## 📖 Usage
 
-### Receiver
+### Receive
 ```bash
-./build/bandrop receive              # default port 9090
-./build/bandrop receive --port 8080
+./build/bandrop receive                 # waits, and announces itself on the LAN
+./build/bandrop receive --out ~/Inbox   # save into a directory
+./build/bandrop receive --port 8080 --no-announce
 ```
-It waits for a sender, then prompts for the 6-digit pairing code.
+The receiver prints a prompt; type the 6-digit code shown by the sender.
 
-### Sender
+### Send
 ```bash
-./build/bandrop send <ip> <file> [--port <port>]
-# e.g.
-./build/bandrop send 192.168.1.42 ~/video.mp4
+# Auto-discover the receiver on the LAN (no IP needed):
+./build/bandrop send report.pdf ~/photos
+
+# Or target a specific host:
+./build/bandrop send bigfile.iso --to 192.168.1.42
+
+# Compress on the way:
+./build/bandrop send logs/ --compress
 ```
-Bandrop prints a 6-digit code — share it with the receiver to complete the transfer.
+Bandrop prints a **pairing code** — read it out to the person receiving.
 
-## 🔒 Security notes
+### Discover
+```bash
+./build/bandrop discover     # list receivers currently waiting on the LAN
+```
 
-A 6-digit PIN has ~20 bits of entropy, so Bandrop is designed for trusted local
-networks. The PBKDF2 work factor slows brute force, but the pairing model assumes
-the receiver only accepts a connection they are expecting. It is not a replacement
-for an authenticated key exchange over a hostile network.
+## 🔒 Security model
+
+Bandrop uses SPAKE2, so a 6-digit code is enough: an active attacker gets only
+**one online guess per connection** and learns nothing to attack offline.
+Confidentiality and integrity in transit come from AES-256-GCM keyed by the
+SPAKE2 session key, and each file is SHA-256-verified end to end.
+
+That said, this is a compact utility, not an audited security product. The
+threat model is a trusted user moving files across a local network; it is not a
+substitute for a reviewed, hardened transport in a hostile environment.
+
+## 🧩 Layout
+
+| File | Responsibility |
+|------|----------------|
+| `crypto.h` | AES-256-GCM, HKDF, HMAC, SHA-256, RNG |
+| `spake2.h` | SPAKE2 password-authenticated key exchange |
+| `session.h` | Sealed, length-framed message channel |
+| `protocol.h` | Framing, (de)serialization, path hygiene |
+| `net.h` | TCP connect/listen helpers |
+| `discovery.h` | UDP broadcast peer discovery |
+| `archive.h` | Directory walking & path reconstruction |
+| `compress.h` | Optional zlib chunk compression |
+| `ui.h` | Progress bar, rate/ETA, human sizes |
+| `sender.h` / `receiver.h` | Transfer orchestration |
 
 ---
 *Built with ❤️ by Ilia Banda*

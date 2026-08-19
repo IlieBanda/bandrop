@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include "archive.h"
+#include "compress.h"
 #include "crypto.h"
 #include "net.h"
 #include "protocol.h"
@@ -15,7 +16,8 @@
 class Sender {
 public:
     // Send one or more paths (files and/or directories) to host:port.
-    int start(const std::string& host, int port, const std::vector<std::string>& inputs) {
+    int start(const std::string& host, int port, const std::vector<std::string>& inputs,
+              bool use_compression = false) {
         std::vector<archive::Entry> entries = archive::collect(inputs);
         if (entries.empty()) {
             std::cerr << "Nothing to send (no readable files in the given paths).\n";
@@ -77,6 +79,7 @@ public:
         proto::Writer man;
         man.u32((uint32_t)entries.size());
         man.u64((uint64_t)total_bytes);
+        man.u8(use_compression ? 1 : 0);   // flags: bit0 = zlib-compressed data
         if (!sess.send(proto::MSG_MANIFEST, man.buf)) { std::cerr << "\nSend failed.\n"; ::close(fd); return 1; }
 
         std::cout << "Sending " << entries.size() << " item(s), "
@@ -104,7 +107,10 @@ public:
                 std::streamsize got = f.gcount();
                 if (got <= 0) break;
                 hash.update(chunk.data(), (size_t)got);
-                payload.assign(chunk.begin(), chunk.begin() + got);
+                if (use_compression)
+                    payload = zip::deflate(chunk.data(), (size_t)got);
+                else
+                    payload.assign(chunk.begin(), chunk.begin() + got);
                 if (!sess.send(proto::MSG_DATA, payload)) { std::cerr << "\nSend failed.\n"; ::close(fd); return 1; }
                 fsent += got; sent += got;
                 bar.update(sent);

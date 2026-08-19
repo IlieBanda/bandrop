@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 #include "archive.h"
+#include "compress.h"
 #include "crypto.h"
 #include "discovery.h"
 #include "net.h"
@@ -109,6 +110,7 @@ private:
         Session sess(fd, s.key);
         int64_t total_bytes = 0;
         uint32_t total_files = 0;
+        bool compressed = false;
         int64_t received = 0;
         ui::Progress* bar = nullptr;
 
@@ -134,6 +136,7 @@ private:
             if (type == proto::MSG_MANIFEST) {
                 total_files = pr.u32();
                 total_bytes = (int64_t)pr.u64();
+                compressed = (pr.u8() & 1) != 0;
                 std::cout << "Incoming: " << total_files << " item(s), "
                           << ui::human_size(total_bytes) << " total.\n";
                 bar = new ui::Progress(total_bytes);
@@ -150,10 +153,21 @@ private:
                 cur_hash = new crypto::Sha256();
             } else if (type == proto::MSG_DATA) {
                 if (!out.is_open()) { std::cerr << "\nProtocol error (data before file).\n"; delete bar; return 1; }
-                out.write((const char*)payload.data(), payload.size());
-                cur_hash->update(payload.data(), payload.size());
-                cur_written += (int64_t)payload.size();
-                received += (int64_t)payload.size();
+                const unsigned char* raw = payload.data();
+                size_t raw_len = payload.size();
+                std::vector<unsigned char> inflated;
+                if (compressed) {
+                    try { inflated = zip::inflate(payload.data(), payload.size()); }
+                    catch (const std::exception& e) {
+                        std::cerr << "\n[ERROR] Decompression failed: " << e.what() << "\n";
+                        cleanup_cur(); delete bar; return 1;
+                    }
+                    raw = inflated.data(); raw_len = inflated.size();
+                }
+                out.write((const char*)raw, raw_len);
+                cur_hash->update(raw, raw_len);
+                cur_written += (int64_t)raw_len;
+                received += (int64_t)raw_len;
                 if (bar) bar->update(received);
             } else if (type == proto::MSG_FILE_END) {
                 auto want = pr.blob();

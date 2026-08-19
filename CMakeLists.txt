@@ -9,9 +9,10 @@ endif()
 add_compile_options(-Wall -Wextra)
 
 find_package(OpenSSL REQUIRED)
+find_package(ZLIB REQUIRED)
 
 add_executable(bandrop main.cpp)
-target_link_libraries(bandrop OpenSSL::SSL OpenSSL::Crypto)
+target_link_libraries(bandrop OpenSSL::SSL OpenSSL::Crypto ZLIB::ZLIB)
 
 enable_testing()
 add_executable(selftest tests/selftest.cpp)

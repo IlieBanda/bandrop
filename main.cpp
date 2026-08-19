@@ -32,6 +32,7 @@ void usage(const char* prog) {
         "Options:\n"
         "  --to IP       Receiver address (skip LAN discovery).\n"
         "  --port N      TCP port (default " << DEFAULT_PORT << ").\n"
+        "  --compress    Compress data on the fly (zlib) when sending.\n"
         "  --out DIR     Directory to save received files into (default: current).\n"
         "  --no-announce Do not advertise this receiver over UDP discovery.\n"
         "  -h, --help    Show this help.\n";
@@ -76,6 +77,7 @@ int cmd_send(std::vector<std::string> a) {
     std::string val, to;
     if (take_opt(a, "--port", val) && !parse_port(val, port)) return 1;
     take_opt(a, "--to", to);
+    bool compress = take_flag(a, "--compress");
     if (a.empty()) { std::cerr << "send: no files given.\n\n"; return 1; }
 
     if (to.empty()) {
@@ -94,7 +96,7 @@ int cmd_send(std::vector<std::string> a) {
                          "Use --to to pick another.)\n";
     }
     Sender s;
-    return s.start(to, port, a);
+    return s.start(to, port, a, compress);
 }
 
 int cmd_discover() {
