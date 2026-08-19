@@ -8,6 +8,7 @@
 #include "discovery.h"
 #include "pipe.h"
 #include "serve.h"
+#include "broadcast.h"
 #include "receipt.h"
 #include "identity.h"
 #include <fstream>
@@ -32,6 +33,7 @@ void usage(const char* prog) {
         "  " << prog << " send <path> [<path>...] [--to IP] [--port N]\n"
         "  " << prog << " pipe --listen | pipe --to IP    (secure stdin<->stdout)\n"
         "  " << prog << " serve <path>...  [--port N] [--once]   (download in a browser)\n"
+        "  " << prog << " broadcast <path>...              (fan-out to many receivers)\n"
         "  " << prog << " verify <receipt.json>   |   " << prog << " id\n"
         "  " << prog << " discover\n\n"
         "Commands:\n"
@@ -42,6 +44,7 @@ void usage(const char* prog) {
         "              but zero-config). Composes with any Unix command.\n"
         "  serve       Share files over HTTP so any browser/phone can download them\n"
         "              (plain HTTP; LAN convenience mode). Prints a URL and QR code.\n"
+        "  broadcast   Send one set of files to many receivers with a single code.\n"
         "  discover    List receivers currently waiting on the LAN.\n\n"
         "Options:\n"
         "  --to IP       Receiver address (skip LAN discovery).\n"
@@ -86,7 +89,16 @@ int cmd_receive(std::vector<std::string> a) {
     bool announce = !take_flag(a, "--no-announce");
     bool overwrite = take_flag(a, "--overwrite");
     std::string receipt_path; take_opt(a, "--receipt", receipt_path);
+    std::string from; take_opt(a, "--from", from);
+    bool find_broadcast = take_flag(a, "--broadcast");
     Receiver r;
+    if (find_broadcast && from.empty()) {
+        std::cout << "Looking for a broadcaster on the LAN...\n";
+        for (auto& p : discovery::browse(1500)) if (p.service == 1) { from = p.ip; port = p.port; break; }
+        if (from.empty()) { std::cerr << "No broadcaster found. Use --from <ip>.\n"; return 1; }
+    }
+    if (!from.empty())
+        return r.start_connect(from, port, out_dir, overwrite, receipt_path);
     return r.start(port, out_dir, announce, hostname_or("bandrop"), overwrite, receipt_path);
 }
 
@@ -173,6 +185,16 @@ int cmd_id() {
     return 0;
 }
 
+int cmd_broadcast(std::vector<std::string> a) {
+    int port = DEFAULT_PORT;
+    std::string val;
+    if (take_opt(a, "--port", val) && !parse_port(val, port)) return 1;
+    bool compress = take_flag(a, "--compress");
+    if (a.empty()) { std::cerr << "broadcast: no files given.\n"; return 1; }
+    Broadcaster b;
+    return b.start(a, port, compress, hostname_or("bandrop"));
+}
+
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -193,6 +215,7 @@ int main(int argc, char* argv[]) {
     if (cmd == "send")    return cmd_send(args);
     if (cmd == "pipe")     return cmd_pipe(args);
     if (cmd == "serve")    return cmd_serve(args);
+    if (cmd == "broadcast") return cmd_broadcast(args);
     if (cmd == "verify")   return cmd_verify(args);
     if (cmd == "id")       return cmd_id();
     if (cmd == "discover") return cmd_discover();

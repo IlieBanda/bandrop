@@ -21,6 +21,7 @@ struct Peer {
     std::string ip;
     int port;
     std::string name;
+    int service = 0;   // 0 = receiver (1:1), 1 = broadcaster
 };
 
 // Open a UDP socket bound to the discovery port to answer queries.
@@ -38,7 +39,7 @@ inline int open_responder() {
 }
 
 // Answer one pending query on `fd`, advertising `tcp_port` and `name`.
-inline void answer_query(int fd, int tcp_port, const std::string& name) {
+inline void answer_query(int fd, int tcp_port, const std::string& name, int service = 0) {
     unsigned char buf[512];
     sockaddr_in from{}; socklen_t fl = sizeof(from);
     ssize_t n = ::recvfrom(fd, buf, sizeof(buf), 0, (sockaddr*)&from, &fl);
@@ -49,6 +50,7 @@ inline void answer_query(int fd, int tcp_port, const std::string& name) {
     w.u16(proto::PROTOCOL_VERSION);
     w.u16((uint16_t)tcp_port);
     w.str(name);
+    w.u8((uint8_t)service);
     ::sendto(fd, w.buf.data(), w.buf.size(), 0, (sockaddr*)&from, fl);
 }
 
@@ -85,11 +87,13 @@ inline std::vector<Peer> browse(int timeout_ms = 1200) {
         int port = r.u16();
         std::string name = r.str();
         if (!r.ok) continue;
+        int service = 0;
+        if (r.left >= 1) service = r.u8();
         char ip[INET_ADDRSTRLEN] = {0};
         inet_ntop(AF_INET, &from.sin_addr, ip, sizeof(ip));
         bool dup = false;
         for (auto& p : peers) if (p.ip == ip && p.port == port) dup = true;
-        if (!dup) peers.push_back({ip, port, name});
+        if (!dup) peers.push_back({ip, port, name, service});
     }
     ::close(fd);
     return peers;

@@ -1,20 +1,19 @@
 #pragma once
 #include <unistd.h>
+#include <ctime>
 #include <fstream>
 #include <iostream>
 #include <string>
-#include <ctime>
 #include <vector>
 #include "archive.h"
 #include "compress.h"
 #include "crypto.h"
 #include "handshake.h"
 #include "identity.h"
-#include "receipt.h"
 #include "net.h"
 #include "protocol.h"
+#include "receipt.h"
 #include "session.h"
-#include "spake2.h"
 #include "ui.h"
 
 class Sender {
@@ -34,7 +33,6 @@ public:
         if (fd < 0) return 1;
         std::cout << "Connected to " << host << ":" << port << ".\n";
 
-        // --- SPAKE2 handshake -------------------------------------------
         std::string pin = make_pin();
         std::cout << "\n=========================================\n"
                   << "  PAIRING CODE:  " << pin << "\n"
@@ -47,18 +45,27 @@ public:
             ::close(fd); return 1;
         }
         std::cout << "Secure channel established.\n";
+        int rc = run_transfer(fd, *key, entries, total_bytes, use_compression, false);
+        ::close(fd);
+        return rc;
+    }
 
-        // --- transfer ---------------------------------------------------
-        Session sess(fd, *key);
+    // Perform the transfer over an already-paired session. Reused by broadcast.
+    // `quiet` suppresses the progress bar (for concurrent fan-out).
+    static int run_transfer(int fd, const std::vector<unsigned char>& key,
+                            const std::vector<archive::Entry>& entries,
+                            int64_t total_bytes, bool use_compression, bool quiet) {
+        Session sess(fd, key);
 
         proto::Writer man;
         man.u32((uint32_t)entries.size());
         man.u64((uint64_t)total_bytes);
-        man.u8(use_compression ? 1 : 0);   // flags: bit0 = zlib-compressed data
-        if (!sess.send(proto::MSG_MANIFEST, man.buf)) { std::cerr << "\nSend failed.\n"; ::close(fd); return 1; }
+        man.u8(use_compression ? 1 : 0);
+        if (!sess.send(proto::MSG_MANIFEST, man.buf)) return 1;
 
-        std::cout << "Sending " << entries.size() << " item(s), "
-                  << ui::human_size(total_bytes) << " total.\n";
+        if (!quiet)
+            std::cout << "Sending " << entries.size() << " item(s), "
+                      << ui::human_size(total_bytes) << " total.\n";
 
         ui::Progress bar(total_bytes);
         int64_t sent = 0;
@@ -66,61 +73,51 @@ public:
         std::vector<unsigned char> payload;
         std::vector<receipt::FileRec> recs;
 
-        for (size_t idx = 0; idx < entries.size(); ++idx) {
-            const auto& e = entries[idx];
+        for (const auto& e : entries) {
             std::ifstream f(e.abs_path, std::ios::binary);
             if (!f) { std::cerr << "\nSkip (cannot open): " << e.abs_path << "\n"; continue; }
 
             proto::Writer fh;
             fh.str(e.rel_path);
             fh.u64((uint64_t)(e.size > 0 ? e.size : 0));
-            if (!sess.send(proto::MSG_FILE_START, fh.buf)) { std::cerr << "\nSend failed.\n"; ::close(fd); return 1; }
+            if (!sess.send(proto::MSG_FILE_START, fh.buf)) return 1;
 
             crypto::Sha256 hash;
-            int64_t fsent = 0;
             while (f) {
                 f.read((char*)chunk.data(), proto::CHUNK_SIZE);
                 std::streamsize got = f.gcount();
                 if (got <= 0) break;
                 hash.update(chunk.data(), (size_t)got);
-                if (use_compression)
-                    payload = zip::deflate(chunk.data(), (size_t)got);
-                else
-                    payload.assign(chunk.begin(), chunk.begin() + got);
-                if (!sess.send(proto::MSG_DATA, payload)) { std::cerr << "\nSend failed.\n"; ::close(fd); return 1; }
-                fsent += got; sent += got;
-                bar.update(sent);
+                if (use_compression) payload = zip::deflate(chunk.data(), (size_t)got);
+                else payload.assign(chunk.begin(), chunk.begin() + got);
+                if (!sess.send(proto::MSG_DATA, payload)) return 1;
+                sent += got;
+                if (!quiet) bar.update(sent);
             }
             auto sha = hash.final();
-            proto::Writer fe;
-            fe.blob(sha);
-            if (!sess.send(proto::MSG_FILE_END, fe.buf)) { std::cerr << "\nSend failed.\n"; ::close(fd); return 1; }
+            proto::Writer fe; fe.blob(sha);
+            if (!sess.send(proto::MSG_FILE_END, fe.buf)) return 1;
             recs.push_back({e.rel_path, (uint64_t)(e.size > 0 ? e.size : 0), sha});
         }
 
-        // Signed receipt of the whole transfer.
         {
-            identity::Key key = identity::load_or_create();
+            identity::Key idkey = identity::load_or_create();
             receipt::Receipt r;
             r.timestamp = (uint64_t)time(nullptr);
             r.files = recs;
-            receipt::sign(r, key);
+            receipt::sign(r, idkey);
             std::string js = receipt::to_json(r);
-            std::vector<unsigned char> payload(js.begin(), js.end());
-            sess.send(proto::MSG_RECEIPT, payload);
-            std::cout << "Signed as " << identity::fingerprint(key.pub) << ".\n";
+            std::vector<unsigned char> pl(js.begin(), js.end());
+            sess.send(proto::MSG_RECEIPT, pl);
+            if (!quiet) std::cout << "Signed as " << identity::fingerprint(idkey.pub) << ".\n";
         }
         sess.send(proto::MSG_DONE, {});
-        bar.finish(sent);
-        ::close(fd);
-        std::cout << "Done. All items sent and verified end-to-end.\n";
+        if (!quiet) { bar.finish(sent); std::cout << "Done. All items sent and verified end-to-end.\n"; }
         return 0;
     }
 
-private:
     static std::string make_pin() {
-        unsigned char r[4];
-        uint32_t v = 0;
+        unsigned char r[4]; uint32_t v = 0;
         if (crypto::random_bytes(r, 4))
             v = ((uint32_t)r[0]<<24)|((uint32_t)r[1]<<16)|((uint32_t)r[2]<<8)|r[3];
         return std::to_string(100000 + (v % 900000));

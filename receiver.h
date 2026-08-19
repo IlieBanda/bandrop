@@ -51,6 +51,19 @@ public:
         return rc;
     }
 
+    // Connect to a broadcaster (fan-out) and receive, using a known code.
+    int start_connect(const std::string& host, int port, const std::string& out_dir,
+                      bool overwrite, const std::string& receipt_path) {
+        overwrite_ = overwrite;
+        receipt_path_ = receipt_path;
+        int fd = net::connect_tcp(host, port);
+        if (fd < 0) return 1;
+        std::cout << "Connected to broadcaster " << host << ":" << port << ".\n";
+        int rc = handle(fd, out_dir);
+        ::close(fd);
+        return rc;
+    }
+
 private:
     bool overwrite_ = false;
     std::string receipt_path_;
