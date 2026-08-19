@@ -1,41 +1,61 @@
 # 🚀 Bandrop
 
-**Bandrop** is a blazingly fast, secure, and lightweight P2P (Peer-to-Peer) file transfer CLI utility written in pure C++.
+**Bandrop** is a fast, secure, lightweight P2P file transfer CLI written in C++.
 
-Inspired by *Magic Wormhole* and *AirDrop*, Bandrop allows you to securely send files across your local network using a simple 6-digit pairing code. No cloud servers, no file size limits, no tracking.
+Inspired by *Magic Wormhole* and *AirDrop*, Bandrop securely sends files across
+your local network using a simple 6-digit pairing code. No cloud servers, no
+accounts, no tracking.
 
 ## ✨ Features
-- **End-to-End Encryption:** Your files are encrypted on the fly using military-grade **AES-256-CBC**.
-- **Password Pairing:** No need to share long encryption keys. Bandrop generates a random 6-digit PIN and securely hashes it using **SHA-256** to derive the AES key.
-- **Console UI:** Includes a beautiful terminal progress bar and automatic original file name preservation.
-- **Zero Dependencies:** Written in raw C++ POSIX sockets. Only requires OpenSSL.
 
-## 🛠️ Build & Install
+- **Authenticated encryption over a framed protocol.** Files are streamed as
+  length-prefixed **AES-256-CBC** messages, each with a fresh random IV. Because
+  every message is framed, transfers stay correct over TCP regardless of how the
+  stream is chunked.
+- **PIN-based pairing with a real KDF.** The sender shows a random 6-digit PIN.
+  The key is derived from that PIN and a per-session random salt using
+  **PBKDF2-HMAC-SHA256** (200k iterations) — the PIN itself never crosses the wire.
+- **Wrong-PIN detection.** A bad code fails the padding check on the first frame,
+  so the receiver reports the error and cleans up instead of writing garbage.
+- **Robust I/O.** Full send/recv loops, socket and file error handling, filename
+  sanitization (basename only — no path traversal), progress bar, and human-readable
+  sizes.
+- **Minimal dependencies.** POSIX sockets and OpenSSL only.
+
+## 🛠️ Build
 
 ```bash
 git clone https://github.com/IlieBanda/bandrop.git
 cd bandrop
-mkdir build && cd build
-cmake ..
-make
+cmake -S . -B build
+cmake --build build
 ```
+
+The binary is produced at `build/bandrop`.
 
 ## 📖 Usage
 
-### Receiver (Server)
-Start listening for incoming files. It will prompt you for the 6-digit pairing code provided by the sender.
+### Receiver
 ```bash
-./bandrop receive
-# Or specify a custom port:
-./bandrop receive --port 8080
+./build/bandrop receive              # default port 9090
+./build/bandrop receive --port 8080
 ```
+It waits for a sender, then prompts for the 6-digit pairing code.
 
-### Sender (Client)
-Send a file using the interactive mode or the single-line command:
+### Sender
 ```bash
-./bandrop send <ip_address> /path/to/file.mp4
+./build/bandrop send <ip> <file> [--port <port>]
+# e.g.
+./build/bandrop send 192.168.1.42 ~/video.mp4
 ```
-Bandrop will output a 6-digit connection code. Share this code with the receiver to securely transmit the file!
+Bandrop prints a 6-digit code — share it with the receiver to complete the transfer.
+
+## 🔒 Security notes
+
+A 6-digit PIN has ~20 bits of entropy, so Bandrop is designed for trusted local
+networks. The PBKDF2 work factor slows brute force, but the pairing model assumes
+the receiver only accepts a connection they are expecting. It is not a replacement
+for an authenticated key exchange over a hostile network.
 
 ---
 *Built with ❤️ by Ilia Banda*
