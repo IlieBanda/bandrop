@@ -1,111 +1,122 @@
 #pragma once
-#include <arpa/inet.h>
-#include <sys/socket.h>
 #include <unistd.h>
-#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <string>
 #include <vector>
+#include "archive.h"
 #include "crypto.h"
+#include "net.h"
 #include "protocol.h"
+#include "session.h"
+#include "spake2.h"
 #include "ui.h"
 
 class Sender {
 public:
-    // Returns 0 on success, non-zero on failure.
-    int start(const std::string& ip, int port, const std::string& filepath) {
-        // Open and size the file up front so we fail before connecting.
-        std::ifstream file(filepath, std::ios::binary | std::ios::ate);
-        if (!file) {
-            std::cerr << "Cannot open file: " << filepath << "\n";
+    // Send one or more paths (files and/or directories) to host:port.
+    int start(const std::string& host, int port, const std::vector<std::string>& inputs) {
+        std::vector<archive::Entry> entries = archive::collect(inputs);
+        if (entries.empty()) {
+            std::cerr << "Nothing to send (no readable files in the given paths).\n";
             return 1;
         }
-        int64_t filesize = static_cast<int64_t>(file.tellg());
-        file.seekg(0, std::ios::beg);
+        int64_t total_bytes = 0;
+        for (auto& e : entries) total_bytes += (e.size > 0 ? e.size : 0);
 
-        int sock = ::socket(AF_INET, SOCK_STREAM, 0);
-        if (sock < 0) { perror("socket"); return 1; }
+        int fd = net::connect_tcp(host, port);
+        if (fd < 0) return 1;
+        std::cout << "Connected to " << host << ":" << port << ".\n";
 
-        sockaddr_in serv{};
-        serv.sin_family = AF_INET;
-        serv.sin_port = htons(static_cast<uint16_t>(port));
-        if (inet_pton(AF_INET, ip.c_str(), &serv.sin_addr) != 1) {
-            std::cerr << "Invalid IP address: " << ip << "\n";
-            ::close(sock);
-            return 1;
-        }
-        if (::connect(sock, reinterpret_cast<sockaddr*>(&serv), sizeof(serv)) < 0) {
-            perror("connect");
-            ::close(sock);
-            return 1;
-        }
-        std::cout << "Connected to " << ip << ":" << port << ".\n";
-
-        // Generate a random session salt and a 6-digit pairing code.
-        unsigned char salt[AesEncryptor::SALT_LEN];
-        if (!AesEncryptor::random_bytes(salt, sizeof(salt))) {
-            std::cerr << "Failed to generate random salt.\n";
-            ::close(sock);
-            return 1;
-        }
-        std::string password = make_pin();
+        // --- SPAKE2 handshake -------------------------------------------
+        auto salt = crypto::random_vec(crypto::SALT_LEN);
+        std::string pin = make_pin();
         std::cout << "\n=========================================\n"
-                  << "  PAIRING CODE: " << password << "\n"
+                  << "  PAIRING CODE:  " << pin << "\n"
                   << "=========================================\n"
-                  << "Share this code with the receiver.\n";
+                  << "Enter this code on the receiver.\n\n" << std::flush;
 
-        AesEncryptor cryptor(password, salt);
+        Spake2 spake(Spake2::Role::A, pin, salt.data(), salt.size());
 
-        // 1. Send the salt (plaintext) so the receiver can derive the key.
-        if (!send_all(sock, salt, sizeof(salt))) {
-            std::cerr << "Failed to send handshake.\n";
-            ::close(sock);
-            return 1;
+        // HELLO: version, salt, our public element X.
+        proto::Writer hello;
+        hello.u16(proto::PROTOCOL_VERSION);
+        hello.bytes(salt.data(), salt.size());
+        hello.blob(spake.public_share());
+        if (!proto::send_frame(fd, hello.buf.data(), (uint32_t)hello.buf.size())) {
+            std::cerr << "Handshake send failed.\n"; ::close(fd); return 1;
         }
 
-        // 2. Send the encrypted header.
-        FileHeader header{};
-        std::string name = safe_basename(filepath);
-        std::strncpy(header.filename, name.c_str(), sizeof(header.filename) - 1);
-        header.filesize = filesize;
-
-        std::vector<unsigned char> enc(AesEncryptor::IV_LEN + sizeof(FileHeader) + 32);
-        int elen = cryptor.encrypt(reinterpret_cast<unsigned char*>(&header),
-                                   sizeof(FileHeader), enc.data());
-        if (elen < 0 || !send_frame(sock, enc.data(), static_cast<uint32_t>(elen))) {
-            std::cerr << "Failed to send file header.\n";
-            ::close(sock);
-            return 1;
+        // REPLY: peer element Y + peer confirmation.
+        std::vector<unsigned char> buf;
+        uint32_t rlen = 0;
+        if (proto::recv_frame(fd, buf, &rlen) != 1) {
+            std::cerr << "Handshake failed (receiver disconnected).\n"; ::close(fd); return 1;
         }
+        proto::Reader rr(buf.data(), rlen);
+        auto peer_share = rr.blob();
+        auto peer_confirm = rr.blob();
+        if (!rr.ok) { std::cerr << "Malformed handshake reply.\n"; ::close(fd); return 1; }
 
-        // 3. Stream the file in encrypted, length-framed chunks.
-        std::vector<unsigned char> buffer(CHUNK_SIZE);
-        std::vector<unsigned char> encbuf(AesEncryptor::IV_LEN + CHUNK_SIZE + 32);
+        Spake2::Session s = spake.finish(peer_share);
+        if (!spake.verify_peer(peer_confirm)) {
+            std::cerr << "[ERROR] Pairing failed: wrong code on the receiver.\n";
+            ::close(fd); return 1;
+        }
+        // CONFIRM: our confirmation MAC.
+        proto::Writer conf;
+        conf.blob(s.confirm);
+        if (!proto::send_frame(fd, conf.buf.data(), (uint32_t)conf.buf.size())) {
+            std::cerr << "Handshake send failed.\n"; ::close(fd); return 1;
+        }
+        std::cout << "Secure channel established.\n";
+
+        // --- transfer ---------------------------------------------------
+        Session sess(fd, s.key);
+
+        proto::Writer man;
+        man.u32((uint32_t)entries.size());
+        man.u64((uint64_t)total_bytes);
+        if (!sess.send(proto::MSG_MANIFEST, man.buf)) { std::cerr << "\nSend failed.\n"; ::close(fd); return 1; }
+
+        std::cout << "Sending " << entries.size() << " item(s), "
+                  << ui::human_size(total_bytes) << " total.\n";
+
+        ui::Progress bar(total_bytes);
         int64_t sent = 0;
-        std::cout << "Sending \"" << name << "\" (" << human_size(filesize) << ")...\n";
-        while (file) {
-            file.read(reinterpret_cast<char*>(buffer.data()), CHUNK_SIZE);
-            std::streamsize got = file.gcount();
-            if (got <= 0) break;
-            elen = cryptor.encrypt(buffer.data(), static_cast<int>(got), encbuf.data());
-            if (elen < 0 || !send_frame(sock, encbuf.data(), static_cast<uint32_t>(elen))) {
-                std::cerr << "\nFailed to send data.\n";
-                ::close(sock);
-                return 1;
-            }
-            sent += got;
-            draw_progress(sent, filesize);
-        }
-        std::cout << "\n";
-        ::close(sock);
+        std::vector<unsigned char> chunk(proto::CHUNK_SIZE);
+        std::vector<unsigned char> payload;
 
-        if (sent != filesize) {
-            std::cerr << "[WARNING] Only sent " << human_size(sent)
-                      << " of " << human_size(filesize) << ".\n";
-            return 1;
+        for (size_t idx = 0; idx < entries.size(); ++idx) {
+            const auto& e = entries[idx];
+            std::ifstream f(e.abs_path, std::ios::binary);
+            if (!f) { std::cerr << "\nSkip (cannot open): " << e.abs_path << "\n"; continue; }
+
+            proto::Writer fh;
+            fh.str(e.rel_path);
+            fh.u64((uint64_t)(e.size > 0 ? e.size : 0));
+            if (!sess.send(proto::MSG_FILE_START, fh.buf)) { std::cerr << "\nSend failed.\n"; ::close(fd); return 1; }
+
+            crypto::Sha256 hash;
+            int64_t fsent = 0;
+            while (f) {
+                f.read((char*)chunk.data(), proto::CHUNK_SIZE);
+                std::streamsize got = f.gcount();
+                if (got <= 0) break;
+                hash.update(chunk.data(), (size_t)got);
+                payload.assign(chunk.begin(), chunk.begin() + got);
+                if (!sess.send(proto::MSG_DATA, payload)) { std::cerr << "\nSend failed.\n"; ::close(fd); return 1; }
+                fsent += got; sent += got;
+                bar.update(sent);
+            }
+            proto::Writer fe;
+            fe.blob(hash.final());
+            if (!sess.send(proto::MSG_FILE_END, fe.buf)) { std::cerr << "\nSend failed.\n"; ::close(fd); return 1; }
         }
-        std::cout << "Done. Sent and encrypted successfully.\n";
+        sess.send(proto::MSG_DONE, {});
+        bar.finish(sent);
+        ::close(fd);
+        std::cout << "Done. All items sent and verified end-to-end.\n";
         return 0;
     }
 
@@ -113,10 +124,8 @@ private:
     static std::string make_pin() {
         unsigned char r[4];
         uint32_t v = 0;
-        if (AesEncryptor::random_bytes(r, sizeof(r))) {
-            v = (uint32_t(r[0]) << 24) | (uint32_t(r[1]) << 16) |
-                (uint32_t(r[2]) << 8) | uint32_t(r[3]);
-        }
+        if (crypto::random_bytes(r, 4))
+            v = ((uint32_t)r[0]<<24)|((uint32_t)r[1]<<16)|((uint32_t)r[2]<<8)|r[3];
         return std::to_string(100000 + (v % 900000));
     }
 };

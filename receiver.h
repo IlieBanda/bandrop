@@ -1,133 +1,181 @@
 #pragma once
-#include <arpa/inet.h>
-#include <sys/socket.h>
-#include <unistd.h>
+#include <sys/select.h>
 #include <cerrno>
-#include <cstring>
+#include <unistd.h>
 #include <fstream>
 #include <iostream>
 #include <string>
 #include <vector>
+#include "archive.h"
 #include "crypto.h"
+#include "discovery.h"
+#include "net.h"
 #include "protocol.h"
+#include "session.h"
+#include "spake2.h"
 #include "ui.h"
 
 class Receiver {
 public:
-    // Returns 0 on success, non-zero on failure.
-    int start(int port) {
-        int server_fd = ::socket(AF_INET, SOCK_STREAM, 0);
-        if (server_fd < 0) { perror("socket"); return 1; }
+    // Listen on `port`, save incoming files under `out_dir`. When `announce`
+    // is set, answer LAN discovery queries while waiting.
+    int start(int port, const std::string& out_dir, bool announce, const std::string& name) {
+        int listen_fd = net::listen_tcp(port, 1);
+        if (listen_fd < 0) return 1;
 
-        int opt = 1;
-        setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-
-        sockaddr_in address{};
-        address.sin_family = AF_INET;
-        address.sin_addr.s_addr = INADDR_ANY;
-        address.sin_port = htons(static_cast<uint16_t>(port));
-
-        if (::bind(server_fd, reinterpret_cast<sockaddr*>(&address), sizeof(address)) < 0) {
-            perror("bind");
-            ::close(server_fd);
-            return 1;
+        int disc_fd = -1;
+        if (announce) {
+            disc_fd = discovery::open_responder();
+            std::cout << (disc_fd >= 0
+                ? "Discoverable on the LAN as \"" + name + "\".\n"
+                : "(discovery unavailable; senders must use the IP)\n");
         }
-        if (::listen(server_fd, 1) < 0) {
-            perror("listen");
-            ::close(server_fd);
-            return 1;
-        }
-
         std::cout << "Listening on port " << port << ", waiting for a sender...\n";
-        socklen_t addrlen = sizeof(address);
-        int client = ::accept(server_fd, reinterpret_cast<sockaddr*>(&address), &addrlen);
-        ::close(server_fd);
-        if (client < 0) { perror("accept"); return 1; }
 
-        char peer[INET_ADDRSTRLEN] = {0};
-        inet_ntop(AF_INET, &address.sin_addr, peer, sizeof(peer));
-        std::cout << "Sender connected from " << peer << ".\n";
+        int client = wait_for_client(listen_fd, disc_fd, port, name);
+        ::close(listen_fd);
+        if (disc_fd >= 0) ::close(disc_fd);
+        if (client < 0) return 1;
 
-        int rc = receive(client);
+        std::cout << "Sender connected from " << net::peer_ip(client) << ".\n";
+        int rc = handle(client, out_dir);
         ::close(client);
         return rc;
     }
 
 private:
-    int receive(int client) {
-        // 1. Receive the session salt.
-        unsigned char salt[AesEncryptor::SALT_LEN];
-        if (!recv_all(client, salt, sizeof(salt))) {
-            std::cerr << "Connection closed during handshake.\n";
+    // Accept a TCP connection, answering discovery queries meanwhile.
+    int wait_for_client(int listen_fd, int disc_fd, int port, const std::string& name) {
+        for (;;) {
+            fd_set rs; FD_ZERO(&rs);
+            FD_SET(listen_fd, &rs);
+            int maxfd = listen_fd;
+            if (disc_fd >= 0) { FD_SET(disc_fd, &rs); if (disc_fd > maxfd) maxfd = disc_fd; }
+            if (::select(maxfd + 1, &rs, nullptr, nullptr, nullptr) < 0) {
+                if (errno == EINTR) continue;
+                perror("select"); return -1;
+            }
+            if (disc_fd >= 0 && FD_ISSET(disc_fd, &rs))
+                discovery::answer_query(disc_fd, port, name);
+            if (FD_ISSET(listen_fd, &rs))
+                return ::accept(listen_fd, nullptr, nullptr);
+        }
+    }
+
+    int handle(int fd, const std::string& out_dir) {
+        // --- SPAKE2 handshake -------------------------------------------
+        std::vector<unsigned char> buf;
+        uint32_t len = 0;
+        if (proto::recv_frame(fd, buf, &len) != 1) {
+            std::cerr << "Handshake failed (no HELLO).\n"; return 1;
+        }
+        proto::Reader hr(buf.data(), len);
+        uint16_t ver = hr.u16();
+        if (ver != proto::PROTOCOL_VERSION) {
+            std::cerr << "Protocol mismatch (sender v" << ver
+                      << ", we speak v" << proto::PROTOCOL_VERSION << ").\n";
             return 1;
         }
+        unsigned char salt[crypto::SALT_LEN];
+        for (int i = 0; i < crypto::SALT_LEN; ++i) salt[i] = hr.u8();
+        auto peer_share = hr.blob();
+        if (!hr.ok) { std::cerr << "Malformed HELLO.\n"; return 1; }
 
-        // 2. Prompt for the pairing code and derive the key.
-        std::string password;
+        std::string pin;
         std::cout << "Enter the 6-digit pairing code: ";
-        if (!(std::cin >> password)) return 1;
-        AesEncryptor cryptor(password, salt);
+        if (!(std::cin >> pin)) return 1;
 
-        std::vector<unsigned char> frame(MAX_FRAME);
-        std::vector<unsigned char> plain(MAX_FRAME);
+        Spake2 spake(Spake2::Role::B, pin, salt, sizeof(salt));
+        Spake2::Session s = spake.finish(peer_share);
 
-        // 3. First frame is the encrypted file header; failure means wrong PIN.
-        uint32_t flen = 0;
-        if (recv_frame(client, frame.data(), frame.size(), &flen) != 1) {
-            std::cerr << "Failed to receive file header.\n";
-            return 1;
+        // REPLY: our element + confirmation.
+        proto::Writer reply;
+        reply.blob(spake.public_share());
+        reply.blob(s.confirm);
+        if (!proto::send_frame(fd, reply.buf.data(), (uint32_t)reply.buf.size())) return 1;
+
+        // CONFIRM from sender.
+        if (proto::recv_frame(fd, buf, &len) != 1) {
+            std::cerr << "[ERROR] Pairing failed (wrong code).\n"; return 1;
         }
-        int plen = cryptor.decrypt(frame.data(), static_cast<int>(flen), plain.data());
-        if (plen != sizeof(FileHeader)) {
-            std::cerr << "\n[ERROR] Wrong pairing code (or corrupt stream).\n";
-            return 1;
+        proto::Reader cr(buf.data(), len);
+        auto peer_confirm = cr.blob();
+        if (!cr.ok || !spake.verify_peer(peer_confirm)) {
+            std::cerr << "[ERROR] Pairing failed: wrong code.\n"; return 1;
         }
-        FileHeader header;
-        std::memcpy(&header, plain.data(), sizeof(FileHeader));
-        header.filename[sizeof(header.filename) - 1] = '\0';
-        std::string out_name = safe_basename(header.filename);
+        std::cout << "Secure channel established.\n";
 
-        std::cout << "Receiving \"" << out_name << "\" ("
-                  << human_size(header.filesize) << ")...\n";
-
-        std::ofstream out(out_name, std::ios::binary | std::ios::trunc);
-        if (!out) {
-            std::cerr << "Cannot open output file: " << out_name << "\n";
-            return 1;
-        }
-
-        // 4. Stream the remaining frames.
+        // --- receive ----------------------------------------------------
+        Session sess(fd, s.key);
+        int64_t total_bytes = 0;
+        uint32_t total_files = 0;
         int64_t received = 0;
-        while (true) {
-            int r = recv_frame(client, frame.data(), frame.size(), &flen);
-            if (r == 0) break;             // clean EOF
-            if (r < 0) {
-                std::cerr << "\nConnection error during transfer.\n";
-                out.close();
-                ::remove(out_name.c_str());
-                return 1;
-            }
-            plen = cryptor.decrypt(frame.data(), static_cast<int>(flen), plain.data());
-            if (plen < 0) {
-                std::cerr << "\n[ERROR] Decryption failed (corrupt or tampered data).\n";
-                out.close();
-                ::remove(out_name.c_str());
-                return 1;
-            }
-            out.write(reinterpret_cast<char*>(plain.data()), plen);
-            received += plen;
-            draw_progress(received, header.filesize);
-        }
-        out.close();
-        std::cout << "\n";
+        ui::Progress* bar = nullptr;
 
-        if (header.filesize >= 0 && received != header.filesize) {
-            std::cerr << "[WARNING] Incomplete transfer: got "
-                      << human_size(received) << " of "
-                      << human_size(header.filesize) << ".\n";
-            return 1;
+        std::ofstream out;
+        std::string cur_name;
+        int64_t cur_expected = 0, cur_written = 0;
+        crypto::Sha256* cur_hash = nullptr;
+        int files_done = 0;
+
+        auto cleanup_cur = [&]() {
+            if (out.is_open()) out.close();
+            delete cur_hash; cur_hash = nullptr;
+        };
+
+        for (;;) {
+            uint8_t type = 0;
+            std::vector<unsigned char> payload;
+            int r = sess.recv(type, payload);
+            if (r == 0) { std::cerr << "\nConnection closed unexpectedly.\n"; cleanup_cur(); delete bar; return 1; }
+            if (r < 0) { std::cerr << "\n[ERROR] Corrupt or tampered data — aborting.\n"; cleanup_cur(); delete bar; return 1; }
+            proto::Reader pr(payload.data(), payload.size());
+
+            if (type == proto::MSG_MANIFEST) {
+                total_files = pr.u32();
+                total_bytes = (int64_t)pr.u64();
+                std::cout << "Incoming: " << total_files << " item(s), "
+                          << ui::human_size(total_bytes) << " total.\n";
+                bar = new ui::Progress(total_bytes);
+            } else if (type == proto::MSG_FILE_START) {
+                cleanup_cur();
+                std::string rel = proto::safe_relpath(pr.str());
+                cur_expected = (int64_t)pr.u64();
+                if (!pr.ok) { std::cerr << "\nMalformed file header.\n"; delete bar; return 1; }
+                std::string full = out_dir.empty() ? rel : out_dir + "/" + rel;
+                archive::make_parent_dirs(out_dir.empty() ? "." : out_dir, rel);
+                out.open(full, std::ios::binary | std::ios::trunc);
+                if (!out) { std::cerr << "\nCannot write: " << full << "\n"; delete bar; return 1; }
+                cur_name = full; cur_written = 0;
+                cur_hash = new crypto::Sha256();
+            } else if (type == proto::MSG_DATA) {
+                if (!out.is_open()) { std::cerr << "\nProtocol error (data before file).\n"; delete bar; return 1; }
+                out.write((const char*)payload.data(), payload.size());
+                cur_hash->update(payload.data(), payload.size());
+                cur_written += (int64_t)payload.size();
+                received += (int64_t)payload.size();
+                if (bar) bar->update(received);
+            } else if (type == proto::MSG_FILE_END) {
+                auto want = pr.blob();
+                auto got = cur_hash->final();
+                out.close();
+                delete cur_hash; cur_hash = nullptr;
+                if (want != got) {
+                    std::cerr << "\n[ERROR] Integrity check failed for " << cur_name << ".\n";
+                    delete bar; return 1;
+                }
+                if (cur_expected >= 0 && cur_written != cur_expected)
+                    std::cerr << "\n[WARNING] Size mismatch for " << cur_name << ".\n";
+                ++files_done;
+            } else if (type == proto::MSG_DONE) {
+                break;
+            }
         }
-        std::cout << "Done. Saved to \"" << out_name << "\".\n";
+        cleanup_cur();
+        if (bar) bar->finish(received);
+        delete bar;
+        std::cout << "Done. Received and verified " << files_done << " file(s)"
+                  << (out_dir.empty() ? "" : " into \"" + out_dir + "/\"") << ".\n";
         return 0;
     }
 };

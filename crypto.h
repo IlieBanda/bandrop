@@ -1,87 +1,166 @@
 #pragma once
 #include <openssl/evp.h>
+#include <openssl/hmac.h>
 #include <openssl/rand.h>
+#include <openssl/sha.h>
+#include <cstdint>
 #include <cstring>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
-// AES-256-CBC with a fresh random IV per message. The key is derived from the
-// pairing PIN and a per-session salt via PBKDF2-HMAC-SHA256. Each encrypted
-// message on the wire is laid out as: IV (16 bytes) || ciphertext.
-class AesEncryptor {
+// Cryptographic primitives for Bandrop.
+//
+// Transport confidentiality/integrity uses AES-256-GCM (AEAD): every wire
+// message carries a fresh 96-bit nonce and a 128-bit authentication tag, so
+// tampering or truncation is detected on decryption. Session keys come from
+// the SPAKE2 handshake (see spake2.h); this file provides the AEAD, HKDF,
+// HMAC and streaming SHA-256 helpers it and the transfer code rely on.
+namespace crypto {
+
+constexpr int KEY_LEN = 32;   // AES-256
+constexpr int NONCE_LEN = 12; // GCM nonce
+constexpr int TAG_LEN = 16;   // GCM tag
+constexpr int SALT_LEN = 16;
+
+inline bool random_bytes(unsigned char* buf, int len) {
+    return RAND_bytes(buf, len) == 1;
+}
+
+inline std::vector<unsigned char> random_vec(int len) {
+    std::vector<unsigned char> v(len);
+    if (!random_bytes(v.data(), len)) throw std::runtime_error("RAND_bytes failed");
+    return v;
+}
+
+// --- SHA-256 -------------------------------------------------------------
+
+inline std::vector<unsigned char> sha256(const unsigned char* data, size_t len) {
+    std::vector<unsigned char> out(SHA256_DIGEST_LENGTH);
+    SHA256(data, len, out.data());
+    return out;
+}
+
+// Incremental SHA-256 for hashing a file as it streams by.
+class Sha256 {
 public:
-    static constexpr int KEY_LEN = 32;
-    static constexpr int IV_LEN = 16;
-    static constexpr int SALT_LEN = 16;
-    static constexpr int PBKDF2_ITERS = 200000;
-
-    // Fill `buf` with `len` cryptographically secure random bytes.
-    static bool random_bytes(unsigned char* buf, int len) {
-        return RAND_bytes(buf, len) == 1;
+    Sha256() : ctx_(EVP_MD_CTX_new()) { EVP_DigestInit_ex(ctx_, EVP_sha256(), nullptr); }
+    ~Sha256() { if (ctx_) EVP_MD_CTX_free(ctx_); }
+    Sha256(const Sha256&) = delete;
+    Sha256& operator=(const Sha256&) = delete;
+    void update(const unsigned char* d, size_t n) { EVP_DigestUpdate(ctx_, d, n); }
+    std::vector<unsigned char> final() {
+        std::vector<unsigned char> out(SHA256_DIGEST_LENGTH);
+        unsigned int len = 0;
+        EVP_DigestFinal_ex(ctx_, out.data(), &len);
+        out.resize(len);
+        return out;
     }
+private:
+    EVP_MD_CTX* ctx_;
+};
 
-    // Derive the AES key from the pairing password and salt.
-    AesEncryptor(const std::string& password, const unsigned char* salt) {
-        if (PKCS5_PBKDF2_HMAC(password.c_str(), static_cast<int>(password.size()),
-                              salt, SALT_LEN, PBKDF2_ITERS, EVP_sha256(),
-                              KEY_LEN, key_) != 1) {
-            throw std::runtime_error("key derivation failed");
-        }
+// --- HMAC-SHA256 & HKDF --------------------------------------------------
+
+inline std::vector<unsigned char> hmac_sha256(const unsigned char* key, size_t key_len,
+                                              const unsigned char* data, size_t data_len) {
+    std::vector<unsigned char> out(SHA256_DIGEST_LENGTH);
+    unsigned int outlen = 0;
+    HMAC(EVP_sha256(), key, static_cast<int>(key_len), data, data_len, out.data(), &outlen);
+    out.resize(outlen);
+    return out;
+}
+
+// HKDF (RFC 5869) extract-then-expand, producing `length` bytes.
+inline std::vector<unsigned char> hkdf(const unsigned char* ikm, size_t ikm_len,
+                                       const unsigned char* salt, size_t salt_len,
+                                       const std::string& info, size_t length) {
+    std::vector<unsigned char> prk = hmac_sha256(salt, salt_len, ikm, ikm_len);
+    std::vector<unsigned char> okm;
+    std::vector<unsigned char> t;
+    unsigned char counter = 1;
+    while (okm.size() < length) {
+        std::vector<unsigned char> input = t;
+        input.insert(input.end(), info.begin(), info.end());
+        input.push_back(counter++);
+        t = hmac_sha256(prk.data(), prk.size(), input.data(), input.size());
+        okm.insert(okm.end(), t.begin(), t.end());
     }
+    okm.resize(length);
+    return okm;
+}
 
-    ~AesEncryptor() { OPENSSL_cleanse(key_, sizeof(key_)); }
+// --- AES-256-GCM AEAD ----------------------------------------------------
 
-    // Encrypt `plaintext_len` bytes. Writes IV || ciphertext into `out`, which
-    // must have room for IV_LEN + plaintext_len + block padding. Returns the
-    // number of bytes written, or -1 on failure.
-    int encrypt(const unsigned char* plaintext, int plaintext_len, unsigned char* out) {
-        unsigned char* iv = out;
-        if (!random_bytes(iv, IV_LEN)) return -1;
+// Seal `pt_len` plaintext bytes under `key` (32 bytes) with optional
+// associated data. Writes nonce || ciphertext || tag into `out` (which needs
+// NONCE_LEN + pt_len + TAG_LEN bytes). Returns bytes written or -1.
+inline int seal(const unsigned char* key,
+                const unsigned char* pt, int pt_len,
+                const unsigned char* aad, int aad_len,
+                unsigned char* out) {
+    unsigned char* nonce = out;
+    if (!random_bytes(nonce, NONCE_LEN)) return -1;
+    unsigned char* ct = out + NONCE_LEN;
 
-        EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
-        if (!ctx) return -1;
-
-        int result = -1;
-        unsigned char* ct = out + IV_LEN;
-        int len = 0, total = 0;
-        if (EVP_EncryptInit_ex(ctx, EVP_aes_256_cbc(), nullptr, key_, iv) == 1 &&
-            EVP_EncryptUpdate(ctx, ct, &len, plaintext, plaintext_len) == 1) {
+    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+    if (!ctx) return -1;
+    int result = -1, len = 0, total = 0;
+    if (EVP_EncryptInit_ex(ctx, EVP_aes_256_gcm(), nullptr, nullptr, nullptr) == 1 &&
+        EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN, NONCE_LEN, nullptr) == 1 &&
+        EVP_EncryptInit_ex(ctx, nullptr, nullptr, key, nonce) == 1) {
+        int tmp = 0;
+        bool ok = true;
+        if (aad && aad_len > 0)
+            ok = EVP_EncryptUpdate(ctx, nullptr, &tmp, aad, aad_len) == 1;
+        if (ok && EVP_EncryptUpdate(ctx, ct, &len, pt, pt_len) == 1) {
             total = len;
             if (EVP_EncryptFinal_ex(ctx, ct + total, &len) == 1) {
                 total += len;
-                result = IV_LEN + total;
+                unsigned char* tag = ct + total;
+                if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG, TAG_LEN, tag) == 1)
+                    result = NONCE_LEN + total + TAG_LEN;
             }
         }
-        EVP_CIPHER_CTX_free(ctx);
-        return result;
     }
+    EVP_CIPHER_CTX_free(ctx);
+    return result;
+}
 
-    // Decrypt a wire message (IV || ciphertext) of `in_len` bytes into `out`.
-    // Returns the plaintext length, or -1 on failure (including a wrong PIN,
-    // which surfaces as a padding-check failure).
-    int decrypt(const unsigned char* in, int in_len, unsigned char* out) {
-        if (in_len < IV_LEN) return -1;
-        const unsigned char* iv = in;
-        const unsigned char* ct = in + IV_LEN;
-        int ct_len = in_len - IV_LEN;
+// Open a sealed message (nonce || ciphertext || tag). Returns plaintext length
+// or -1 on authentication failure (wrong key, tampering, truncation).
+inline int open(const unsigned char* key,
+                const unsigned char* in, int in_len,
+                const unsigned char* aad, int aad_len,
+                unsigned char* out) {
+    if (in_len < NONCE_LEN + TAG_LEN) return -1;
+    const unsigned char* nonce = in;
+    const unsigned char* ct = in + NONCE_LEN;
+    int ct_len = in_len - NONCE_LEN - TAG_LEN;
+    const unsigned char* tag = in + in_len - TAG_LEN;
 
-        EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
-        if (!ctx) return -1;
-
-        int result = -1;
-        int len = 0, total = 0;
-        if (EVP_DecryptInit_ex(ctx, EVP_aes_256_cbc(), nullptr, key_, iv) == 1 &&
-            EVP_DecryptUpdate(ctx, out, &len, ct, ct_len) == 1) {
+    EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+    if (!ctx) return -1;
+    int result = -1, len = 0, total = 0;
+    if (EVP_DecryptInit_ex(ctx, EVP_aes_256_gcm(), nullptr, nullptr, nullptr) == 1 &&
+        EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN, NONCE_LEN, nullptr) == 1 &&
+        EVP_DecryptInit_ex(ctx, nullptr, nullptr, key, nonce) == 1) {
+        int tmp = 0;
+        bool ok = true;
+        if (aad && aad_len > 0)
+            ok = EVP_DecryptUpdate(ctx, nullptr, &tmp, aad, aad_len) == 1;
+        if (ok && EVP_DecryptUpdate(ctx, out, &len, ct, ct_len) == 1) {
             total = len;
-            if (EVP_DecryptFinal_ex(ctx, out + total, &len) == 1) {
+            if (EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_TAG, TAG_LEN,
+                                    const_cast<unsigned char*>(tag)) == 1 &&
+                EVP_DecryptFinal_ex(ctx, out + total, &len) == 1) {
                 total += len;
                 result = total;
             }
         }
-        EVP_CIPHER_CTX_free(ctx);
-        return result;
     }
+    EVP_CIPHER_CTX_free(ctx);
+    return result;
+}
 
-private:
-    unsigned char key_[KEY_LEN];
-};
+} // namespace crypto
