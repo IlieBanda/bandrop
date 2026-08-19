@@ -8,6 +8,9 @@
 #include "discovery.h"
 #include "pipe.h"
 #include "serve.h"
+#include "receipt.h"
+#include "identity.h"
+#include <fstream>
 #include "receiver.h"
 #include "sender.h"
 
@@ -29,6 +32,7 @@ void usage(const char* prog) {
         "  " << prog << " send <path> [<path>...] [--to IP] [--port N]\n"
         "  " << prog << " pipe --listen | pipe --to IP    (secure stdin<->stdout)\n"
         "  " << prog << " serve <path>...  [--port N] [--once]   (download in a browser)\n"
+        "  " << prog << " verify <receipt.json>   |   " << prog << " id\n"
         "  " << prog << " discover\n\n"
         "Commands:\n"
         "  receive     Wait for an incoming transfer (announces itself on the LAN).\n"
@@ -46,6 +50,7 @@ void usage(const char* prog) {
         "  --out DIR     Directory to save received files into (default: current).\n"
         "  --no-announce Do not advertise this receiver over UDP discovery.\n"
         "  --overwrite   Overwrite existing files instead of auto-renaming.\n"
+        "  --receipt F   (receive) Save a signed receipt of the transfer to F.\n"
         "  -h, --help    Show this help.\n";
 }
 
@@ -80,8 +85,9 @@ int cmd_receive(std::vector<std::string> a) {
     take_opt(a, "--out", out_dir);
     bool announce = !take_flag(a, "--no-announce");
     bool overwrite = take_flag(a, "--overwrite");
+    std::string receipt_path; take_opt(a, "--receipt", receipt_path);
     Receiver r;
-    return r.start(port, out_dir, announce, hostname_or("bandrop"), overwrite);
+    return r.start(port, out_dir, announce, hostname_or("bandrop"), overwrite, receipt_path);
 }
 
 int cmd_send(std::vector<std::string> a) {
@@ -143,6 +149,30 @@ int cmd_serve(std::vector<std::string> a) {
     return s.start(a, port, once);
 }
 
+int cmd_verify(std::vector<std::string> a) {
+    if (a.empty()) { std::cerr << "verify: give a receipt file.\n"; return 1; }
+    std::ifstream in(a[0]);
+    if (!in) { std::cerr << "Cannot open " << a[0] << "\n"; return 1; }
+    std::string js((std::istreambuf_iterator<char>(in)), {});
+    receipt::Receipt r;
+    if (!receipt::from_json(js, r)) { std::cerr << "Not a valid receipt.\n"; return 1; }
+    if (!receipt::verify(r)) { std::cerr << "INVALID: signature does not verify.\n"; return 1; }
+    std::cout << "VALID receipt, signed by " << identity::fingerprint(r.sender_pub) << "\n";
+    std::cout << "  time:  " << receipt::iso8601(r.timestamp) << "\n";
+    std::cout << "  files: " << r.files.size() << "\n";
+    for (auto& f : r.files)
+        std::cout << "    " << f.path << "  (" << f.size << " bytes)  "
+                  << receipt::to_hex(f.sha).substr(0, 16) << "...\n";
+    return 0;
+}
+
+int cmd_id() {
+    identity::Key k = identity::load_or_create();
+    std::cout << "Your Bandrop identity:\n  fingerprint: " << identity::fingerprint(k.pub)
+              << "\n  public key:  " << receipt::to_hex(k.pub) << "\n";
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char* argv[]) {
@@ -163,6 +193,8 @@ int main(int argc, char* argv[]) {
     if (cmd == "send")    return cmd_send(args);
     if (cmd == "pipe")     return cmd_pipe(args);
     if (cmd == "serve")    return cmd_serve(args);
+    if (cmd == "verify")   return cmd_verify(args);
+    if (cmd == "id")       return cmd_id();
     if (cmd == "discover") return cmd_discover();
     std::cerr << "Unknown command: " << cmd << "\n\n";
     usage(argv[0]);

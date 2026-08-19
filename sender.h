@@ -3,11 +3,14 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <ctime>
 #include <vector>
 #include "archive.h"
 #include "compress.h"
 #include "crypto.h"
 #include "handshake.h"
+#include "identity.h"
+#include "receipt.h"
 #include "net.h"
 #include "protocol.h"
 #include "session.h"
@@ -61,6 +64,7 @@ public:
         int64_t sent = 0;
         std::vector<unsigned char> chunk(proto::CHUNK_SIZE);
         std::vector<unsigned char> payload;
+        std::vector<receipt::FileRec> recs;
 
         for (size_t idx = 0; idx < entries.size(); ++idx) {
             const auto& e = entries[idx];
@@ -87,9 +91,24 @@ public:
                 fsent += got; sent += got;
                 bar.update(sent);
             }
+            auto sha = hash.final();
             proto::Writer fe;
-            fe.blob(hash.final());
+            fe.blob(sha);
             if (!sess.send(proto::MSG_FILE_END, fe.buf)) { std::cerr << "\nSend failed.\n"; ::close(fd); return 1; }
+            recs.push_back({e.rel_path, (uint64_t)(e.size > 0 ? e.size : 0), sha});
+        }
+
+        // Signed receipt of the whole transfer.
+        {
+            identity::Key key = identity::load_or_create();
+            receipt::Receipt r;
+            r.timestamp = (uint64_t)time(nullptr);
+            r.files = recs;
+            receipt::sign(r, key);
+            std::string js = receipt::to_json(r);
+            std::vector<unsigned char> payload(js.begin(), js.end());
+            sess.send(proto::MSG_RECEIPT, payload);
+            std::cout << "Signed as " << identity::fingerprint(key.pub) << ".\n";
         }
         sess.send(proto::MSG_DONE, {});
         bar.finish(sent);

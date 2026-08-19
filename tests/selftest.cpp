@@ -6,6 +6,8 @@
 #include "../crypto.h"
 #include "../spake2.h"
 #include "../qr.h"
+#include "../receipt.h"
+#include "../json.h"
 
 static int failures = 0;
 #define CHECK(cond, msg) do { if (!(cond)) { std::cerr << "FAIL: " << msg << "\n"; ++failures; } \
@@ -101,6 +103,36 @@ static void test_qr_golden() {
     CHECK(ok, "qr encode() URL produces valid matrix");
 }
 
+
+static void test_json_roundtrip() {
+    json::Value o;
+    bool ok = json::parse("{\"a\":1,\"b\":[true,\"x\",null],\"c\":{\"d\":-3.5}}", o);
+    CHECK(ok && o.type == json::Value::Obj, "json parse object");
+    const json::Value* a = o.find("a");
+    CHECK(a && a->num == 1, "json number");
+    const json::Value* b = o.find("b");
+    CHECK(b && b->type == json::Value::Arr && b->arr->size() == 3, "json array");
+}
+
+static void test_receipt_sign_verify() {
+    identity::Key k = identity::load_or_create();
+    receipt::Receipt r;
+    r.timestamp = 1700000000;
+    r.files.push_back({"a.txt", 5, crypto::sha256((const unsigned char*)"hello", 5)});
+    r.files.push_back({"sub/b.bin", 3, crypto::sha256((const unsigned char*)"abc", 3)});
+    receipt::sign(r, k);
+    CHECK(receipt::verify(r), "receipt verifies after signing");
+
+    std::string js = receipt::to_json(r);
+    receipt::Receipt r2;
+    CHECK(receipt::from_json(js, r2), "receipt json round-trip parses");
+    CHECK(receipt::verify(r2), "receipt verifies after json round-trip");
+
+    // Tamper: change a recorded size -> signature must fail.
+    r2.files[0].size = 6;
+    CHECK(!receipt::verify(r2), "receipt rejects tampered size");
+}
+
 int main() {
     test_gcm_roundtrip();
     test_gcm_tamper();
@@ -109,6 +141,8 @@ int main() {
     test_spake2_agreement();
     test_spake2_wrong_pin();
     test_qr_golden();
+    test_json_roundtrip();
+    test_receipt_sign_verify();
     std::cout << (failures ? "\nSOME TESTS FAILED\n" : "\nALL TESTS PASSED\n");
     return failures ? 1 : 0;
 }

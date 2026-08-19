@@ -11,6 +11,7 @@
 #include "crypto.h"
 #include "discovery.h"
 #include "handshake.h"
+#include "receipt.h"
 #include "net.h"
 #include "protocol.h"
 #include "session.h"
@@ -24,8 +25,9 @@ public:
     // Listen on `port`, save incoming files under `out_dir`. When `announce`
     // is set, answer LAN discovery queries while waiting.
     int start(int port, const std::string& out_dir, bool announce, const std::string& name,
-              bool overwrite = false) {
+              bool overwrite = false, const std::string& receipt_path = "") {
         overwrite_ = overwrite;
+        receipt_path_ = receipt_path;
         int listen_fd = net::listen_tcp(port, 1);
         if (listen_fd < 0) return 1;
 
@@ -51,6 +53,7 @@ public:
 
 private:
     bool overwrite_ = false;
+    std::string receipt_path_;
     // Accept a TCP connection, answering discovery queries meanwhile.
     int wait_for_client(int listen_fd, int disc_fd, int port, const std::string& name) {
         for (;;) {
@@ -162,6 +165,20 @@ private:
                 if (cur_expected >= 0 && cur_written != cur_expected)
                     std::cerr << "\n[WARNING] Size mismatch for " << cur_name << ".\n";
                 ++files_done;
+            } else if (type == proto::MSG_RECEIPT) {
+                std::string js((const char*)payload.data(), payload.size());
+                receipt::Receipt rc;
+                if (receipt::from_json(js, rc) && receipt::verify(rc)) {
+                    std::cout << "\nReceipt signed by " << identity::fingerprint(rc.sender_pub)
+                              << " (verified).\n";
+                    if (!receipt_path_.empty()) {
+                        std::ofstream rf(receipt_path_, std::ios::trunc);
+                        rf << receipt::to_json(rc) << "\n";
+                        std::cout << "Receipt written to " << receipt_path_ << ".\n";
+                    }
+                } else {
+                    std::cerr << "\n[WARNING] Transfer receipt failed verification.\n";
+                }
             } else if (type == proto::MSG_DONE) {
                 break;
             }
