@@ -1,0 +1,83 @@
+.TH BANDROP 1 "2026" "bandrop 1.0.0" "User Commands"
+.SH NAME
+bandrop \- secure, zero-config peer-to-peer transfer over your LAN
+.SH SYNOPSIS
+.B bandrop send
+.I path
+.RI [ path ...]
+.RB [ --to
+.IR ip ]
+.RB [ --port
+.IR n ]
+.RB [ --compress ]
+.br
+.B bandrop receive
+.RB [ --port
+.IR n ]
+.RB [ --out
+.IR dir ]
+.RB [ --receipt
+.IR file ]
+.RB [ --overwrite ]
+.RB [ --no-announce ]
+.br
+.B bandrop pipe
+.RB { --listen | --to
+.IR ip }
+.RB [ --code
+.IR c ]
+.RB [ --port
+.IR n ]
+.br
+.B bandrop serve
+.I path
+.RI [ path ...]
+.RB [ --port
+.IR n ]
+.RB [ --once ]
+.br
+.B bandrop verify
+.I receipt.json
+.br
+.B bandrop id
+|
+.B bandrop discover
+|
+.B bandrop --version
+.SH DESCRIPTION
+Bandrop moves data directly between machines with a short pairing code.
+Traffic is end-to-end encrypted (SPAKE2 key agreement, AES-256-GCM) and never
+passes through a relay or cloud service. Receivers are auto-discovered on the
+local network.
+.SH COMMANDS
+.TP
+.B send
+Send files and/or directories. Without \fB--to\fR, discovers a receiver on the
+LAN. Signs a transfer receipt with your identity key.
+.TP
+.B receive
+Wait for a transfer. \fB--receipt\fR saves a signed receipt; existing files are
+auto-renamed unless \fB--overwrite\fR.
+.TP
+.B pipe
+A secure, bidirectional stdin/stdout pipe between two machines. The connecting
+side prints the code; the listening side reads it from the terminal.
+.TP
+.B serve
+Serve files over HTTP with a URL and QR code so any browser can download them.
+Plain HTTP; intended for trusted networks.
+.TP
+.B verify
+Verify a signed receipt offline.
+.TP
+.B id
+Print your Ed25519 identity fingerprint and public key.
+.TP
+.B discover
+List receivers currently waiting on the LAN.
+.SH FILES
+.TP
+.I ~/.config/bandrop/identity.key
+Your Ed25519 private identity key (mode 0600), created on first use.
+.SH AUTHOR
+Ilia Banda.

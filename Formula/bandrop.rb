@@ -2,7 +2,7 @@ class Bandrop < Formula
   desc "Secure, zero-config P2P file & folder transfer over your LAN"
   homepage "https://github.com/IlieBanda/bandrop"
   url "https://github.com/IlieBanda/bandrop/archive/refs/heads/main.tar.gz"
-  version "0.4.0"
+  version "1.0.0"
   license "MIT"
   head "https://github.com/IlieBanda/bandrop.git", branch: "main"
 

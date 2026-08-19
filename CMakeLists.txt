@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
-project(BanDrop VERSION 0.4.0 LANGUAGES CXX)
+project(BanDrop VERSION 1.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -18,6 +18,12 @@ target_link_libraries(bandrop OpenSSL::SSL OpenSSL::Crypto ZLIB::ZLIB Threads::T
 
 include(GNUInstallDirs)
 install(TARGETS bandrop RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(FILES man/bandrop.1 DESTINATION ${CMAKE_INSTALL_MANDIR}/man1 OPTIONAL)
+install(FILES completions/bandrop.bash
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/bash-completion/completions
+        RENAME bandrop OPTIONAL)
+install(FILES completions/_bandrop
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/zsh/site-functions OPTIONAL)
 
 enable_testing()
 add_executable(selftest tests/selftest.cpp)

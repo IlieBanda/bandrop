@@ -1,0 +1,18 @@
+#compdef bandrop
+# zsh completion for bandrop
+_bandrop() {
+  local -a cmds
+  cmds=(send receive pipe serve verify id discover version)
+  if (( CURRENT == 2 )); then
+    _describe 'command' cmds
+    return
+  fi
+  case $words[2] in
+    send)    _arguments '--to[receiver ip]:ip:' '--port[tcp port]:port:' '--compress' '*:file:_files' ;;
+    receive) _arguments '--port:port:' '--out:dir:_files -/' '--receipt:file:_files' '--overwrite' '--no-announce' ;;
+    pipe)    _arguments '--listen' '--to:ip:' '--code:code:' '--port:port:' '--no-announce' ;;
+    serve)   _arguments '--port:port:' '--once' '*:file:_files' ;;
+    verify)  _arguments '*:receipt:_files' ;;
+  esac
+}
+_bandrop
