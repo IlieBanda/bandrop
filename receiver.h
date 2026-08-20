@@ -127,9 +127,37 @@ private:
             if (type == proto::MSG_MANIFEST) {
                 total_files = pr.u32();
                 total_bytes = (int64_t)pr.u64();
-                compressed = (pr.u8() & 1) != 0;
-                std::cout << "Incoming: " << total_files << " item(s), "
-                          << ui::human_size(total_bytes) << " total.\n";
+                uint8_t flags = pr.u8();
+                compressed = (flags & 1) != 0;
+                bool resumable = (flags & 2) != 0;
+                if (resumable) {
+                    // Manifest lists every file with its hash; skip the ones we
+                    // already have complete, and tell the sender what we need.
+                    std::vector<uint32_t> need;
+                    int64_t need_bytes = 0;
+                    for (uint32_t i = 0; i < total_files; ++i) {
+                        std::string rel = proto::safe_relpath(pr.str());
+                        uint64_t sz = pr.u64();
+                        auto want_sha = pr.blob();
+                        if (!pr.ok) { std::cerr << "\nMalformed manifest.\n"; delete bar; return 1; }
+                        std::string full = out_dir.empty() ? rel : out_dir + "/" + rel;
+                        bool have = archive::is_reg(full) &&
+                                    (uint64_t)archive::file_size(full) == sz &&
+                                    archive::sha256_file(full) == want_sha;
+                        if (!have) { need.push_back(i); need_bytes += (int64_t)sz; }
+                    }
+                    proto::Writer nw; nw.u32((uint32_t)need.size());
+                    for (uint32_t i : need) nw.u32(i);
+                    if (!sess.send(proto::MSG_NEED, nw.buf)) { delete bar; return 1; }
+                    files_done = (int)(total_files - need.size());
+                    total_bytes = need_bytes;
+                    std::cout << "Resume: already have " << files_done << " of " << total_files
+                              << " file(s); fetching " << need.size()
+                              << " (" << ui::human_size(need_bytes) << ").\n";
+                } else {
+                    std::cout << "Incoming: " << total_files << " item(s), "
+                              << ui::human_size(total_bytes) << " total.\n";
+                }
                 bar = new ui::Progress(total_bytes);
             } else if (type == proto::MSG_FILE_START) {
                 cleanup_cur();

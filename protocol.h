@@ -26,6 +26,7 @@ enum MsgType : uint8_t {
     MSG_FILE_END   = 4,  // end a file: sha256 of its contents
     MSG_DONE       = 5,  // transfer complete
     MSG_RECEIPT    = 6,  // signed transfer receipt (sender -> receiver)
+    MSG_NEED       = 7,  // (resume) receiver -> sender: indices still needed
 };
 
 // --- reliable stream I/O -------------------------------------------------

@@ -1,9 +1,11 @@
 #pragma once
 #include <sys/stat.h>
+#include <fstream>
 #include <dirent.h>
 #include <algorithm>
 #include <string>
 #include <vector>
+#include "crypto.h"
 
 // Enumerate files to send. A single file yields one entry; a directory is
 // walked recursively, preserving relative paths under the directory's name.
@@ -95,6 +97,17 @@ inline std::string unique_path(const std::string& path) {
         if (::stat(cand.c_str(), &st) != 0) return cand;
     }
     return path;
+}
+
+// SHA-256 of a file on disk (empty vector if it cannot be read).
+inline std::vector<unsigned char> sha256_file(const std::string& path) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) return {};
+    crypto::Sha256 h;
+    std::vector<char> buf(128 * 1024);
+    while (in) { in.read(buf.data(), buf.size()); std::streamsize n = in.gcount();
+        if (n > 0) h.update((const unsigned char*)buf.data(), (size_t)n); }
+    return h.final();
 }
 
 } // namespace archive

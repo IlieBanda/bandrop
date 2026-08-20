@@ -38,6 +38,9 @@ jobs:
       - name: End-to-end broadcast test
         run: bash tests/broadcast_e2e.sh build/bandrop 9220
 
+      - name: End-to-end resume test
+        run: bash tests/resume_e2e.sh build/bandrop 9310
+
       - name: QR reference verification
         if: runner.os == 'Linux'
         run: |
