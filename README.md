@@ -42,6 +42,7 @@ Needs a C++17 compiler, CMake, OpenSSL and zlib.
 | `bandrop receive` | Receive a transfer; can save a signed receipt. |
 | `bandrop pipe` | A secure, paired `stdin↔stdout` pipe between two machines (netcat + ssh, zero-config). |
 | `bandrop serve <paths…>` | Share files over HTTP + QR so **any browser/phone** can download — nothing to install on the other end. |
+| `bandrop broadcast <paths…>` | Fan-out one set of files to **many receivers** with a single code. |
 | `bandrop verify <receipt>` | Verify a signed transfer receipt offline. |
 | `bandrop id` | Show your Ed25519 identity fingerprint. |
 | `bandrop discover` | List receivers waiting on the LAN. |
@@ -60,6 +61,12 @@ bandrop send report.pdf ~/photos/
 The sender shows a 6-digit code; type it on the receiver. Folders keep their
 structure, existing files are auto-renamed (or `--overwrite`), every file is
 SHA-256-verified, and the sender signs a receipt you can keep.
+
+**Resume** an interrupted folder transfer — only the missing files move:
+
+```bash
+bandrop send ~/big-folder --to hostB --resume
+```
 
 ### Pipe — the composable primitive
 
@@ -89,6 +96,17 @@ bandrop serve slides.pdf video.mp4 --once
 Prints a LAN URL and a scannable QR code. Open it on a phone or any device —
 it downloads in the browser, no Bandrop needed on the other side. This mode is
 plain HTTP for convenience; use it on networks you trust.
+
+### Broadcast to many at once
+
+```bash
+bandrop broadcast slides.pdf          # one code, shown once
+# on each device:
+bandrop receive --broadcast           # discovers the broadcaster, then enter the code
+```
+
+Every receiver gets its own end-to-end-encrypted copy; still no server in the
+middle.
 
 ### Signed receipts
 
