@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bandrop</title>
+<meta name="description" content="Secure, zero-config peer-to-peer transfer — send files, pipe commands, or share to a browser, directly between machines.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚀</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  color-scheme: dark;
+  --ground:#0a0f1c; --surface:#111a2e; --surface2:#16223b; --border:#24344f;
+  --text:#e8eefc; --muted:#9fb0d0; --dim:#6b7fa3;
+  --cyan:#6ee7f9; --blue:#7c9cff; --violet:#b78bff;
+  --good:#5be7a9; --warn:#ffcf6e;
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  --sans:'IBM Plex Sans',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  --maxw:1120px;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0; background:var(--ground); color:var(--text); font-family:var(--sans);
+  line-height:1.6; -webkit-font-smoothing:antialiased;
+  background-image:
+    radial-gradient(1200px 600px at 85% -10%, rgba(124,156,255,.14), transparent 60%),
+    radial-gradient(900px 500px at 10% 5%, rgba(110,231,249,.08), transparent 55%);
+}
+a{color:var(--blue); text-decoration:none}
+a:hover{color:var(--cyan)}
+:focus-visible{outline:2px solid var(--cyan); outline-offset:3px; border-radius:3px}
+.wrap{max-width:var(--maxw); margin:0 auto; padding:0 24px}
+.mono{font-family:var(--mono)}
+.eyebrow{font-family:var(--mono); font-size:.78rem; letter-spacing:.22em; text-transform:uppercase; color:var(--cyan)}
+
+/* nav */
+nav{position:sticky; top:0; z-index:20; backdrop-filter:blur(10px);
+  background:rgba(10,15,28,.72); border-bottom:1px solid var(--border)}
+nav .wrap{display:flex; align-items:center; gap:20px; height:60px}
+.brand{font-family:var(--mono); font-weight:800; font-size:1.15rem; letter-spacing:-.02em; color:var(--text)}
+.brand b{color:var(--blue)}
+nav .links{margin-left:auto; display:flex; gap:22px; align-items:center; font-size:.92rem}
+nav .links a{color:var(--muted)}
+nav .links a:hover{color:var(--text)}
+.ghbtn{font-family:var(--mono); font-size:.85rem; padding:8px 14px; border:1px solid var(--border);
+  border-radius:6px; color:var(--text); background:var(--surface)}
+.ghbtn:hover{border-color:var(--blue); color:var(--cyan)}
+@media(max-width:720px){ nav .links a:not(.ghbtn){display:none} }
+
+/* hero */
+.hero{position:relative; overflow:hidden}
+.hero .wrap{display:grid; grid-template-columns:1.15fr .85fr; gap:40px; align-items:center;
+  padding:76px 24px 68px}
+@media(max-width:900px){ .hero .wrap{grid-template-columns:1fr; gap:16px; padding:52px 24px 40px} }
+h1{font-family:var(--mono); font-weight:800; letter-spacing:-.03em; line-height:1.02;
+  font-size:clamp(2.6rem,6vw,4.6rem); margin:.5rem 0 .2rem; text-wrap:balance}
+h1 .g{background:linear-gradient(100deg,var(--cyan),var(--blue) 45%,var(--violet));
+  -webkit-background-clip:text; background-clip:text; color:transparent}
+.lede{font-size:clamp(1.05rem,2.1vw,1.28rem); color:var(--muted); max-width:34ch; text-wrap:balance}
+.cta{display:flex; flex-wrap:wrap; gap:12px; margin-top:26px}
+.btn{font-family:var(--mono); font-weight:700; font-size:.95rem; padding:13px 20px; border-radius:8px;
+  border:1px solid transparent; cursor:pointer; transition:transform .12s ease, box-shadow .2s ease}
+.btn.primary{color:#08111f; background:linear-gradient(100deg,var(--cyan),var(--blue));
+  box-shadow:0 8px 30px -10px rgba(124,156,255,.7)}
+.btn.primary:hover{transform:translateY(-2px)}
+.btn.ghost{color:var(--text); background:var(--surface); border-color:var(--border)}
+.btn.ghost:hover{border-color:var(--blue); color:var(--cyan)}
+.canvaswrap{position:relative; min-height:300px; border:1px solid var(--border); border-radius:14px;
+  background:linear-gradient(180deg,var(--surface),#0c1424); overflow:hidden}
+canvas{display:block; width:100%; height:100%}
+.canvaslabel{position:absolute; left:14px; bottom:12px; font-family:var(--mono); font-size:.72rem;
+  color:var(--dim); letter-spacing:.12em}
+
+/* terminal */
+.term{font-family:var(--mono); font-size:.9rem; background:#0b1220; border:1px solid var(--border);
+  border-radius:12px; overflow:hidden; box-shadow:0 30px 60px -30px rgba(0,0,0,.7)}
+.term .bar{display:flex; align-items:center; gap:8px; padding:11px 14px; border-bottom:1px solid var(--border);
+  background:linear-gradient(180deg,#101a2e,#0c1526)}
+.dot{width:11px; height:11px; border-radius:50%}
+.dot.r{background:#ff5f57}.dot.y{background:#febc2e}.dot.g{background:#28c840}
+.term .bar span{margin-left:8px; color:var(--dim); font-size:.78rem}
+.term pre{margin:0; padding:18px 18px 20px; overflow-x:auto; line-height:1.7}
+.term .p{color:var(--violet)} .term .c{color:var(--cyan)} .term .o{color:var(--muted)}
+.term .ok{color:var(--good)} .term .hl{color:var(--text)}
+
+/* section shell */
+section{padding:64px 0; border-top:1px solid var(--border)}
+.sect-head{max-width:60ch; margin-bottom:34px}
+.sect-head h2{font-family:var(--mono); font-weight:800; font-size:clamp(1.6rem,3vw,2.1rem);
+  letter-spacing:-.02em; margin:.4rem 0 .3rem}
+.sect-head p{color:var(--muted); margin:0}
+
+/* mode grid */
+.grid{display:grid; grid-template-columns:repeat(3,1fr); gap:16px}
+@media(max-width:900px){ .grid{grid-template-columns:1fr 1fr} }
+@media(max-width:560px){ .grid{grid-template-columns:1fr} }
+.card{position:relative; background:var(--surface); border:1px solid var(--border); border-radius:12px;
+  padding:22px 20px; transition:border-color .2s, transform .15s, background .2s}
+.card::before{content:""; position:absolute; inset:0 0 auto 0; height:2px; border-radius:12px 12px 0 0;
+  background:linear-gradient(90deg,var(--cyan),var(--blue),var(--violet)); opacity:0; transition:opacity .2s}
+.card:hover{border-color:#33507f; transform:translateY(-3px); background:#132038}
+.card:hover::before{opacity:1}
+.card .cmd{font-family:var(--mono); font-weight:700; color:var(--text); font-size:1.02rem}
+.card .cmd b{color:var(--blue)}
+.card p{color:var(--muted); margin:.5rem 0 0; font-size:.92rem}
+.tag{display:inline-block; font-family:var(--mono); font-size:.68rem; letter-spacing:.08em; text-transform:uppercase;
+  color:var(--cyan); border:1px solid var(--border); border-radius:20px; padding:3px 10px; margin-top:14px}
+
+/* split feature (pipe) */
+.split{display:grid; grid-template-columns:1fr 1fr; gap:28px; align-items:center}
+@media(max-width:840px){ .split{grid-template-columns:1fr} }
+.split h3{font-family:var(--mono); font-size:1.5rem; margin:.2rem 0 .4rem; letter-spacing:-.01em}
+.split ul{list-style:none; padding:0; margin:16px 0 0; display:grid; gap:10px}
+.split li{padding-left:26px; position:relative; color:var(--muted)}
+.split li::before{content:"→"; position:absolute; left:0; color:var(--cyan); font-family:var(--mono)}
+
+/* security */
+.sec{display:grid; grid-template-columns:repeat(4,1fr); gap:14px}
+@media(max-width:840px){ .sec{grid-template-columns:1fr 1fr} }
+@media(max-width:480px){ .sec{grid-template-columns:1fr} }
+.pill{background:var(--surface2); border:1px solid var(--border); border-radius:12px; padding:18px}
+.pill .k{font-family:var(--mono); font-size:.72rem; letter-spacing:.14em; text-transform:uppercase; color:var(--dim)}
+.pill .v{font-weight:600; margin-top:6px}
+.pill .v b{color:var(--cyan)}
+.note{margin-top:22px; padding:16px 18px; border-left:3px solid var(--violet); background:var(--surface);
+  border-radius:0 10px 10px 0; color:var(--muted); font-size:.92rem}
+
+/* footer */
+footer{border-top:1px solid var(--border); padding:40px 0 56px; color:var(--dim)}
+footer .wrap{display:flex; flex-wrap:wrap; gap:16px; align-items:center; justify-content:space-between}
+footer .mono{color:var(--muted)}
+.copy{cursor:pointer}
+@media(prefers-reduced-motion:reduce){ *{scroll-behavior:auto} }
+</style>
+</head>
+<body>
+
+<nav><div class="wrap">
+  <span class="brand">Ban<b>drop</b></span>
+  <div class="links">
+    <a href="#modes">Commands</a>
+    <a href="#pipe">Pipe</a>
+    <a href="#security">Security</a>
+    <a class="ghbtn" href="https://github.com/IlieBanda/bandrop">GitHub ↗</a>
+  </div>
+</div></nav>
+
+<header class="hero"><div class="wrap">
+  <div>
+    <span class="eyebrow">peer-to-peer · no server in the middle</span>
+    <h1>Move anything,<br><span class="g">machine to machine.</span></h1>
+    <p class="lede">Send files, pipe commands, or share to a browser — paired by a short code, encrypted end-to-end, discovered automatically. No cloud. No accounts.</p>
+    <div class="cta">
+      <button class="btn primary copy" data-copy="curl -fsSL https://raw.githubusercontent.com/IlieBanda/bandrop/main/install.sh | sh">⧉ Copy install command</button>
+      <a class="btn ghost" href="https://github.com/IlieBanda/bandrop">Read the docs</a>
+    </div>
+  </div>
+  <div class="canvaswrap">
+    <canvas id="net" aria-hidden="true"></canvas>
+    <span class="canvaslabel">SPAKE2 · AES-256-GCM · direct</span>
+  </div>
+</div></header>
+
+<section id="quick"><div class="wrap">
+  <div class="term" role="img" aria-label="Example bandrop session">
+    <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span>bandrop — one command</span></div>
+<pre><span class="c">$</span> <span class="hl">bandrop send ~/photos --to laptop</span>
+<span class="o">  PAIRING CODE:  </span><span class="p">418 273</span>
+<span class="o">  Secure channel established.</span>
+<span class="o">  Sending 240 item(s), 1.4 GiB total.</span>
+  <span class="c">[========================================]</span> <span class="hl">100%</span>  1.4 GiB  <span class="hl">312 MiB/s</span>
+<span class="o">  Signed as </span><span class="p">9cf8:2f8b:b56c:a120</span><span class="o">.</span>
+<span class="ok">  Done. All items sent and verified end-to-end.</span></pre>
+  </div>
+</div></section>
+
+<section id="modes"><div class="wrap">
+  <div class="sect-head">
+    <span class="eyebrow">one binary, many jobs</span>
+    <h2>Every way to move data</h2>
+    <p>Files and folders are just the start. The same secure channel powers pipes, browser downloads, and fan-out — all direct peer-to-peer.</p>
+  </div>
+  <div class="grid">
+    <div class="card"><div class="cmd">bandrop <b>send</b></div><p>Files &amp; folders with integrity checks, compression, and resume for interrupted transfers.</p><span class="tag">SHA-256 · resume</span></div>
+    <div class="card"><div class="cmd">bandrop <b>receive</b></div><p>Auto-discovered on the LAN. Never clobbers files; can save a signed receipt.</p><span class="tag">auto-rename</span></div>
+    <div class="card"><div class="cmd">bandrop <b>pipe</b></div><p>Secure, bidirectional stdin↔stdout between machines. netcat + ssh, zero-config.</p><span class="tag">composable</span></div>
+    <div class="card"><div class="cmd">bandrop <b>serve</b></div><p>Share over HTTP with a URL and QR code — any browser or phone downloads it.</p><span class="tag">+ QR code</span></div>
+    <div class="card"><div class="cmd">bandrop <b>broadcast</b></div><p>Fan-out one set of files to many receivers with a single pairing code.</p><span class="tag">1 → many</span></div>
+    <div class="card"><div class="cmd">bandrop <b>verify</b></div><p>Check an Ed25519-signed transfer receipt offline — who sent what, when.</p><span class="tag">provenance</span></div>
+  </div>
+</div></section>
+
+<section id="pipe"><div class="wrap split">
+  <div>
+    <span class="eyebrow">the killer feature</span>
+    <h3>A secure pipe between any two machines</h3>
+    <p style="color:var(--muted)">Drop <span class="mono" style="color:var(--text)">bandrop pipe</span> into any Unix pipeline. No ssh, no open ports to manage, no server — just a short code and an encrypted stream.</p>
+    <ul>
+      <li>Bidirectional, so it composes both ways</li>
+      <li>Pairs with SPAKE2, sealed with AES-256-GCM</li>
+      <li>Moves databases, tarballs, disk images — anything a pipe carries</li>
+    </ul>
+  </div>
+  <div class="term" role="img" aria-label="Pipe example">
+    <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span>secure pipe</span></div>
+<pre><span class="o"># host A</span>
+<span class="c">$</span> pg_dump db | <span class="hl">bandrop pipe</span> --to hostB
+
+<span class="o"># host B</span>
+<span class="c">$</span> <span class="hl">bandrop pipe</span> --listen &gt; db.sql
+
+<span class="o"># or move a whole tree, no temp files</span>
+<span class="c">$</span> tar c ./project | <span class="hl">bandrop pipe</span> --to hostB</pre>
+  </div>
+</div></section>
+
+<section id="security"><div class="wrap">
+  <div class="sect-head">
+    <span class="eyebrow">encrypted end-to-end · direct, always</span>
+    <h2>Security you can reason about</h2>
+    <p>A short code is enough because pairing is a real PAKE — an attacker gets one online guess per connection, never an offline brute force.</p>
+  </div>
+  <div class="sec">
+    <div class="pill"><div class="k">Pairing</div><div class="v"><b>SPAKE2</b> · RFC 9382, P-256</div></div>
+    <div class="pill"><div class="k">In transit</div><div class="v"><b>AES-256-GCM</b> · per-frame nonce</div></div>
+    <div class="pill"><div class="k">Integrity</div><div class="v"><b>SHA-256</b> · every file</div></div>
+    <div class="pill"><div class="k">Provenance</div><div class="v"><b>Ed25519</b> · signed receipts</div></div>
+  </div>
+  <p class="note">Bandrop has a clear threat model — a trusted local network — and no relay or cloud component anywhere. <span class="mono">serve</span> is the one deliberate exception: plain HTTP so any browser works. It's a compact, tested tool, not an audited transport for hostile networks.</p>
+</div></section>
+
+<section id="install"><div class="wrap">
+  <div class="sect-head">
+    <span class="eyebrow">installs in seconds</span>
+    <h2>Get Bandrop</h2>
+    <p>One line builds from source and pulls its own dependencies on Linux and macOS.</p>
+  </div>
+  <div class="term">
+    <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span>install</span></div>
+<pre><span class="o"># one line</span>
+<span class="c">$</span> <span class="hl">curl -fsSL https://raw.githubusercontent.com/IlieBanda/bandrop/main/install.sh | sh</span>
+
+<span class="o"># or Homebrew</span>
+<span class="c">$</span> <span class="hl">brew install --HEAD IlieBanda/bandrop/bandrop</span>
+
+<span class="o"># or from source</span>
+<span class="c">$</span> cmake -S . -B build &amp;&amp; cmake --build build</pre>
+  </div>
+  <div class="cta">
+    <button class="btn primary copy" data-copy="curl -fsSL https://raw.githubusercontent.com/IlieBanda/bandrop/main/install.sh | sh">⧉ Copy install command</button>
+    <a class="btn ghost" href="https://github.com/IlieBanda/bandrop">Star on GitHub ★</a>
+  </div>
+</div></section>
+
+<footer><div class="wrap">
+  <span class="mono">Ban<span style="color:var(--blue)">drop</span> · direct peer-to-peer, always</span>
+  <span>Built with ❤️ by Ilia Banda · MIT</span>
+</div></footer>
+
+<div id="toast" style="position:fixed; left:50%; bottom:28px; transform:translateX(-50%) translateY(20px);
+  background:var(--surface2); border:1px solid var(--blue); color:var(--text); font-family:var(--mono);
+  font-size:.85rem; padding:10px 16px; border-radius:8px; opacity:0; pointer-events:none; transition:.25s">Copied ✓</div>
+
+<script>
+// copy-to-clipboard buttons
+const toast=document.getElementById('toast');
+function ping(){toast.style.opacity=1;toast.style.transform='translateX(-50%) translateY(0)';
+  clearTimeout(ping._t);ping._t=setTimeout(()=>{toast.style.opacity=0;toast.style.transform='translateX(-50%) translateY(20px)';},1400);}
+document.querySelectorAll('.copy').forEach(b=>b.addEventListener('click',()=>{
+  const t=b.getAttribute('data-copy');
+  (navigator.clipboard?navigator.clipboard.writeText(t):Promise.reject()).then(ping).catch(ping);
+}));
+
+// hero P2P node graph
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const cv=document.getElementById('net'), ctx=cv.getContext('2d');
+let W,H,DPR,nodes=[],edges=[],pulses=[];
+function resize(){DPR=Math.min(devicePixelRatio||1,2);const r=cv.parentElement.getBoundingClientRect();
+  W=cv.width=r.width*DPR;H=cv.height=r.height*DPR;cv.style.width=r.width+'px';cv.style.height=r.height+'px';build();}
+function build(){nodes=[];const N=7;
+  for(let i=0;i<N;i++)nodes.push({x:Math.random()*W*.8+W*.1,y:Math.random()*H*.7+H*.15,
+    r:(i%3===0?7:4.5)*DPR,vx:(Math.random()-.5)*.15*DPR,vy:(Math.random()-.5)*.15*DPR});
+  edges=[];for(let i=0;i<N;i++)for(let j=i+1;j<N;j++){const dx=nodes[i].x-nodes[j].x,dy=nodes[i].y-nodes[j].y;
+    if(Math.hypot(dx,dy)<W*.42)edges.push([i,j]);}
+  pulses=edges.slice(0,5).map(e=>({e,t:Math.random()}));}
+const grad=['#6ee7f9','#7c9cff','#b78bff'];
+function frame(){ctx.clearRect(0,0,W,H);
+  ctx.lineWidth=1*DPR;
+  edges.forEach(([a,b])=>{ctx.strokeStyle='rgba(124,156,255,.16)';ctx.beginPath();
+    ctx.moveTo(nodes[a].x,nodes[a].y);ctx.lineTo(nodes[b].x,nodes[b].y);ctx.stroke();});
+  if(!reduce)pulses.forEach(p=>{p.t+=.006;if(p.t>1)p.t=0;const[a,b]=p.e;
+    const x=nodes[a].x+(nodes[b].x-nodes[a].x)*p.t,y=nodes[a].y+(nodes[b].y-nodes[a].y)*p.t;
+    ctx.fillStyle=grad[(a+b)%3];ctx.shadowColor=grad[(a+b)%3];ctx.shadowBlur=12*DPR;
+    ctx.beginPath();ctx.arc(x,y,2.4*DPR,0,7);ctx.fill();ctx.shadowBlur=0;});
+  nodes.forEach((n,i)=>{ if(!reduce){n.x+=n.vx;n.y+=n.vy;
+      if(n.x<W*.06||n.x>W*.94)n.vx*=-1; if(n.y<H*.08||n.y>H*.92)n.vy*=-1;}
+    ctx.fillStyle=grad[i%3];ctx.shadowColor=grad[i%3];ctx.shadowBlur=14*DPR;
+    ctx.beginPath();ctx.arc(n.x,n.y,n.r,0,7);ctx.fill();ctx.shadowBlur=0;});
+  requestAnimationFrame(frame);}
+addEventListener('resize',resize);resize();frame();
+</script>
+</body>
+</html>

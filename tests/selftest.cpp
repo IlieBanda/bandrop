@@ -8,6 +8,7 @@
 #include "../qr.h"
 #include "../receipt.h"
 #include "../json.h"
+#include "../chunker.h"
 
 static int failures = 0;
 #define CHECK(cond, msg) do { if (!(cond)) { std::cerr << "FAIL: " << msg << "\n"; ++failures; } \
@@ -133,6 +134,26 @@ static void test_receipt_sign_verify() {
     CHECK(!receipt::verify(r2), "receipt rejects tampered size");
 }
 
+
+static void test_chunker() {
+    // Deterministic boundaries and a partition that reconstructs the input.
+    std::vector<unsigned char> data(200000);
+    for (size_t i = 0; i < data.size(); ++i) data[i] = (unsigned char)((i * 2654435761u) >> 13);
+    auto a = chunker::split(data.data(), data.size());
+    auto b = chunker::split(data.data(), data.size());
+    bool same = a.size() == b.size();
+    for (size_t i = 0; same && i < a.size(); ++i) same = (a[i].sha == b[i].sha && a[i].len == b[i].len);
+    CHECK(same && a.size() > 1, "chunker deterministic, multiple chunks");
+    uint64_t total = 0; for (auto& c : a) total += c.len;
+    CHECK(total == data.size(), "chunker covers the whole input");
+    // A localized edit only changes nearby chunks (dedup potential).
+    auto data2 = data; data2[100000] ^= 0xFF;
+    auto c2 = chunker::split(data2.data(), data2.size());
+    int shared = 0;
+    for (auto& x : a) for (auto& y : c2) if (x.sha == y.sha) { ++shared; break; }
+    CHECK(shared >= (int)a.size() - 3, "chunker: local edit keeps most chunks reusable");
+}
+
 int main() {
     test_gcm_roundtrip();
     test_gcm_tamper();
@@ -143,6 +164,7 @@ int main() {
     test_qr_golden();
     test_json_roundtrip();
     test_receipt_sign_verify();
+    test_chunker();
     std::cout << (failures ? "\nSOME TESTS FAILED\n" : "\nALL TESTS PASSED\n");
     return failures ? 1 : 0;
 }

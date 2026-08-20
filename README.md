@@ -1,91 +1,96 @@
-<h1 align="center">🚀 Bandrop</h1>
-<p align="center"><b>Secure, zero-config peer-to-peer transfer for your LAN.</b><br>
-Send files & folders, pipe commands between machines, or share to any browser — no cloud, no accounts, no server in the middle.</p>
+<p align="center">
+  <img src="assets/banner.svg" alt="Bandrop" width="100%">
+</p>
+
+<p align="center">
+  <a href="https://github.com/IlieBanda/bandrop/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/IlieBanda/bandrop/ci.yml?branch=main&label=CI&logo=github"></a>
+  <img alt="version" src="https://img.shields.io/badge/version-1.0.0-7c9cff">
+  <img alt="C++17" src="https://img.shields.io/badge/C%2B%2B-17-00599C?logo=cplusplus&logoColor=white">
+  <img alt="platform" src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS-2b3d63">
+  <img alt="license" src="https://img.shields.io/badge/license-MIT-b78bff">
+  <img alt="deps" src="https://img.shields.io/badge/deps-OpenSSL%20%C2%B7%20zlib-16223b">
+</p>
+
+<h3 align="center">Send files, pipe commands, or share to a browser &mdash; directly between machines.<br>No cloud. No accounts. No server in the middle.</h3>
+
+<p align="center"><b><a href="#install">Install</a> · <a href="#what-it-does">Commands</a> · <a href="#the-pipe-the-killer-feature">Pipe</a> · <a href="#security-model">Security</a> · <a href="#how-it-works">How it works</a></b></p>
 
 ---
 
-Bandrop is a single, dependency-light C++ binary that moves data directly between
-machines. Pairing is a short code; encryption is end-to-end
-(**SPAKE2** + **AES-256-GCM**); discovery is automatic on the local network.
-Nothing is proxied through a third party.
+Bandrop is a single, dependency-light C++ binary that moves data **peer-to-peer**.
+Pairing is a short code; encryption is end-to-end (**SPAKE2** key agreement +
+**AES-256-GCM**); the receiver is discovered automatically on your network.
+Nothing is ever proxied through a third party.
+
+```console
+$ bandrop send ~/photos --to laptop
+  PAIRING CODE:  418 273
+  Sending 240 item(s), 1.4 GiB total.
+  [========================================] 100%  1.4 GiB  312 MiB/s  ETA 00:00
+  Signed as 9cf8:2f8b:b56c:a120.
+  Done. All items sent and verified end-to-end.
+```
 
 ## Install
 
-**One line** (Linux/macOS — builds from source, installs deps automatically):
+**One line** — builds from source, installs dependencies for you (Linux/macOS):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/IlieBanda/bandrop/main/install.sh | sh
 ```
 
-**Homebrew:**
+<details>
+<summary><b>Homebrew · from source · other options</b></summary>
 
 ```bash
-brew install --HEAD IlieBanda/bandrop/bandrop     # from a tap
-# or, from a local checkout:
+# Homebrew (tap or local formula)
+brew install --HEAD IlieBanda/bandrop/bandrop
 brew install --build-from-source ./Formula/bandrop.rb
-```
 
-**From source:**
-
-```bash
+# From source
 cmake -S . -B build && cmake --build build     # -> build/bandrop
 sudo make install                              # -> /usr/local/bin/bandrop
 ```
-
-Needs a C++17 compiler, CMake, OpenSSL and zlib.
+Requires a C++17 compiler, CMake, OpenSSL and zlib.
+</details>
 
 ## What it does
 
 | Command | What it's for |
-|---------|---------------|
-| `bandrop send <paths…>` | Send files/folders to another machine (auto-discovers the receiver). |
-| `bandrop receive` | Receive a transfer; can save a signed receipt. |
-| `bandrop pipe` | A secure, paired `stdin↔stdout` pipe between two machines (netcat + ssh, zero-config). |
-| `bandrop serve <paths…>` | Share files over HTTP + QR so **any browser/phone** can download — nothing to install on the other end. |
-| `bandrop broadcast <paths…>` | Fan-out one set of files to **many receivers** with a single code. |
-| `bandrop verify <receipt>` | Verify a signed transfer receipt offline. |
-| `bandrop id` | Show your Ed25519 identity fingerprint. |
-| `bandrop discover` | List receivers waiting on the LAN. |
+|---|---|
+| 📦 `bandrop send <paths…>` | Send files/folders to another machine (auto-discovers the receiver). `--resume`, `--compress`. |
+| 📥 `bandrop receive` | Receive a transfer; auto-renames collisions; can save a signed receipt. |
+| 🔀 `bandrop pipe` | A secure, paired `stdin↔stdout` pipe between machines — **netcat + ssh, zero-config.** |
+| 🌐 `bandrop serve <paths…>` | Share over HTTP + **QR code** so *any browser or phone* can download — nothing to install. |
+| 📡 `bandrop broadcast <paths…>` | Fan-out one set of files to **many receivers** with a single code. |
+| 🧾 `bandrop verify <receipt>` | Verify a signed transfer receipt offline. |
+| 🔑 `bandrop id` · 🔎 `bandrop discover` | Show your identity fingerprint · list receivers on the LAN. |
+
+## Quick tour
 
 ### Send & receive
 
 ```bash
-# receiver
-bandrop receive                      # waits, announces itself on the LAN
-bandrop receive --out ~/Inbox --receipt receipt.json
-
-# sender (auto-discovers the receiver; or use --to <ip>)
-bandrop send report.pdf ~/photos/
+bandrop receive                       # waits, announces itself on the LAN
+bandrop send report.pdf ~/photos/     # auto-discovers it; or --to <ip>
 ```
 
-The sender shows a 6-digit code; type it on the receiver. Folders keep their
-structure, existing files are auto-renamed (or `--overwrite`), every file is
-SHA-256-verified, and the sender signs a receipt you can keep.
+Folders keep their structure, every file is SHA-256-verified, existing files are
+auto-renamed (or `--overwrite`), and the sender signs a receipt you can keep.
+Interrupted a 10 GB folder? `--resume` sends only what's missing.
 
-**Resume** an interrupted folder transfer — only the missing files move:
+### The pipe — *the killer feature*
 
-```bash
-bandrop send ~/big-folder --to hostB --resume
-```
-
-### Pipe — the composable primitive
-
-`bandrop pipe` is the killer feature: a secure, bidirectional pipe you can drop
-into any Unix pipeline, across machines, with no ssh and no server.
+A secure, bidirectional pipe you can drop into **any** Unix pipeline, across
+machines, with no ssh and no server:
 
 ```bash
-# copy a database                          # on the receiving host
+# copy a database                          # on the other host
 pg_dump mydb | bandrop pipe --to hostB     bandrop pipe --listen > mydb.sql
 
-# stream a folder as a tarball
+# move a whole tree, no temp files
 tar c ./project | bandrop pipe --to hostB  bandrop pipe --listen | tar x
-
-# clone a disk, watch a log, move anything a pipe can carry
 ```
-
-The connecting side prints the code (on stderr); the listening side reads it
-from the terminal, so piped data never collides with the prompt. `--code`
-passes it non-interactively.
 
 ### Serve to a browser (+ QR)
 
@@ -93,76 +98,78 @@ passes it non-interactively.
 bandrop serve slides.pdf video.mp4 --once
 ```
 
-Prints a LAN URL and a scannable QR code. Open it on a phone or any device —
-it downloads in the browser, no Bandrop needed on the other side. This mode is
-plain HTTP for convenience; use it on networks you trust.
+Prints a LAN URL **and a scannable QR code** — open it on a phone, it downloads
+in the browser. No Bandrop needed on the other side.
 
-### Broadcast to many at once
-
-```bash
-bandrop broadcast slides.pdf          # one code, shown once
-# on each device:
-bandrop receive --broadcast           # discovers the broadcaster, then enter the code
+```
+█████████████████████████████████
+██ ▄▄▄▄▄ ██▄█▀ ██▄▄██▄▀█ ▄▄▄▄▄ ██
+██ █   █ █  ████▄█ ▀  ▄█ █   █ ██
+██ █▄▄▄█ █  ▄▄█   ▀█▀▄▀█ █▄▄▄█ ██
+██▄▄▄▄▄▄▄█ ▀▄█ ▀▄▀▄█ ▀ █▄▄▄▄▄▄▄██
+   http://192.168.1.5:8000/…
 ```
 
-Every receiver gets its own end-to-end-encrypted copy; still no server in the
-middle.
-
-### Signed receipts
-
-Every `send` signs a receipt with your Ed25519 identity: timestamp, your public
-key, and each file's SHA-256. `receive --receipt out.json` saves it, and anyone
-can check it later:
+### Broadcast & receipts
 
 ```bash
-bandrop verify out.json      # VALID receipt, signed by 9cf8:2f8b:… + file list
+bandrop broadcast slides.pdf     # one code; every receiver gets its own copy
+bandrop verify receipt.json      # VALID, signed by 9cf8:2f8b:… + file list
 ```
-
-Alter any recorded file, size, or hash and verification fails.
 
 ## Security model
 
-- **Pairing:** SPAKE2 (RFC 9382, P-256). The code never crosses the wire and an
-  attacker gets only one online guess per connection — no offline brute force.
-- **In transit:** AES-256-GCM authenticated encryption, fresh nonce per frame;
-  tampering and truncation are detected.
-- **Integrity:** per-file SHA-256, end to end.
-- **Identity/receipts:** Ed25519 signatures.
+| Layer | Mechanism |
+|---|---|
+| **Pairing** | SPAKE2 (RFC 9382, P-256). The code never crosses the wire; an attacker gets **one online guess per connection** — no offline brute force. |
+| **In transit** | AES-256-GCM AEAD, fresh nonce per frame — tampering & truncation are detected. |
+| **Integrity** | Per-file SHA-256, end to end. |
+| **Provenance** | Ed25519-signed receipts; `bandrop verify` checks them offline. |
 
-`serve` is the one exception: plain HTTP on the LAN, by design, so any browser
-can use it. Everything else is end-to-end encrypted and direct — there is no
-relay or cloud component anywhere.
+`serve` is the one deliberate exception: plain HTTP on the LAN so any browser
+works. Everything else is end-to-end encrypted and **direct — no relay, ever.**
 
-Bandrop is a compact tool with a clear threat model (a trusted local network);
-it is not an audited replacement for a hardened transport on a hostile network.
+> Bandrop has a clear threat model (a trusted local network). It's a compact,
+> tested tool, not an audited replacement for a hardened transport on a hostile
+> network.
 
-## Building & testing
+## How it works
 
-```bash
-make            # build
-make test       # unit tests (crypto, SPAKE2, QR, JSON, receipts)
-bash tests/e2e.sh build/bandrop        # end-to-end file transfer
-bash tests/pipe_e2e.sh build/bandrop   # pipe
-bash tests/serve_e2e.sh build/bandrop  # browser serve
-bash tests/receipt_e2e.sh build/bandrop
+```mermaid
+flowchart LR
+    A[Sender] -- "① discover (UDP)" --> B[Receiver]
+    A -- "② SPAKE2 pairing<br/>(6-digit code)" --> B
+    A == "③ AES-256-GCM frames<br/>files · pipe · chunks" ==> B
+    A -. "④ Ed25519 receipt" .-> B
+    classDef n fill:#16223b,stroke:#7c9cff,color:#e8eefc;
+    class A,B n;
 ```
 
-CI builds and runs all of this on Linux and macOS.
-
-## Module layout
+<details>
+<summary><b>Module layout</b></summary>
 
 | File | Responsibility |
-|------|----------------|
+|---|---|
 | `crypto.h` | AES-256-GCM, HKDF, HMAC, SHA-256, RNG |
 | `spake2.h` / `handshake.h` | SPAKE2 PAKE and the pairing exchange |
-| `session.h` | Sealed, length-framed message channel |
-| `protocol.h` | Framing, serialization, path hygiene |
+| `session.h` / `protocol.h` | Sealed, length-framed message channel |
 | `net.h` / `discovery.h` | TCP helpers and UDP peer discovery |
-| `archive.h` / `compress.h` | Directory walking, optional zlib |
-| `sender.h` / `receiver.h` / `pipe.h` / `serve.h` | The transfer modes |
+| `archive.h` / `compress.h` / `chunker.h` | Directory walking, zlib, content-defined chunking |
+| `sender.h` `receiver.h` `pipe.h` `serve.h` `broadcast.h` | The transfer modes |
 | `qr.h` | Self-contained QR encoder (verified against a reference) |
 | `identity.h` / `receipt.h` / `json.h` | Ed25519 identity & signed receipts |
 | `ui.h` | Progress bar, rate/ETA, human sizes |
+</details>
+
+## Build & test
+
+```bash
+make            # build
+make test       # unit tests: crypto, SPAKE2, QR (bit-exact vs reference), JSON, receipts, chunker
+bash tests/e2e.sh build/bandrop          # + pipe / serve / receipt / broadcast / resume suites
+```
+
+CI builds and runs everything on Linux **and** macOS.
 
 ---
-*Built with ❤️ by Ilia Banda. MIT licensed.*
+<p align="center"><sub>Built with ❤️ by Ilia Banda · MIT licensed · direct peer-to-peer, always.</sub></p>

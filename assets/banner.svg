@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="360" viewBox="0 0 1280 360" role="img" aria-label="Bandrop">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1220"/>
+      <stop offset="0.55" stop-color="#111a2e"/>
+      <stop offset="1" stop-color="#0a0f1c"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#6ee7f9"/>
+      <stop offset="0.5" stop-color="#7c9cff"/>
+      <stop offset="1" stop-color="#b78bff"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="8" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect width="1280" height="360" fill="url(#bg)"/>
+  <!-- subtle grid -->
+  <g stroke="#20304d" stroke-width="1" opacity="0.35">
+    <path d="M0 90 H1280 M0 180 H1280 M0 270 H1280"/>
+    <path d="M160 0 V360 M320 0 V360 M480 0 V360 M640 0 V360 M800 0 V360 M960 0 V360 M1120 0 V360"/>
+  </g>
+
+  <!-- P2P nodes motif -->
+  <g fill="none" stroke="url(#accent)" stroke-width="2.5" opacity="0.9">
+    <line x1="980" y1="120" x2="1120" y2="90"  filter="url(#glow)"/>
+    <line x1="980" y1="120" x2="1090" y2="220" filter="url(#glow)"/>
+    <line x1="1120" y1="90" x2="1160" y2="200"/>
+    <line x1="1090" y1="220" x2="1160" y2="200"/>
+    <line x1="980" y1="120" x2="900" y2="230"/>
+  </g>
+  <g fill="url(#accent)">
+    <circle cx="980" cy="120" r="12"/>
+    <circle cx="1120" cy="90" r="9"/>
+    <circle cx="1090" cy="220" r="9"/>
+    <circle cx="1160" cy="200" r="7"/>
+    <circle cx="900" cy="230" r="7"/>
+  </g>
+
+  <!-- wordmark -->
+  <text x="90" y="170" font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="104" font-weight="800" fill="#f4f7ff" letter-spacing="-2">
+    Ban<tspan fill="url(#accent)">drop</tspan>
+  </text>
+  <text x="94" y="228" font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="30" font-weight="500" fill="#9fb0d0">
+    Secure, zero-config peer-to-peer transfer &#8212; for everyone.
+  </text>
+
+  <!-- feature chips -->
+  <g font-family="'Segoe UI',Helvetica,Arial,sans-serif" font-size="20" font-weight="600">
+    <g transform="translate(94,272)">
+      <rect width="150" height="40" rx="20" fill="#16223b" stroke="#2b3d63"/>
+      <text x="75" y="26" text-anchor="middle" fill="#8fe6f5">SPAKE2 + GCM</text>
+    </g>
+    <g transform="translate(256,272)">
+      <rect width="118" height="40" rx="20" fill="#16223b" stroke="#2b3d63"/>
+      <text x="59" y="26" text-anchor="middle" fill="#a9baff">No server</text>
+    </g>
+    <g transform="translate(386,272)">
+      <rect width="160" height="40" rx="20" fill="#16223b" stroke="#2b3d63"/>
+      <text x="80" y="26" text-anchor="middle" fill="#c6a9ff">files &#183; pipe &#183; QR</text>
+    </g>
+    <g transform="translate(558,272)">
+      <rect width="152" height="40" rx="20" fill="#16223b" stroke="#2b3d63"/>
+      <text x="76" y="26" text-anchor="middle" fill="#8fe6f5">signed receipts</text>
+    </g>
+  </g>
+</svg>
